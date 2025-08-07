@@ -1,13 +1,18 @@
 {
   "name": "c64-emulator-decentraland",
   "version": "0.1.0",
-  "description": "MIT-licensed C64 emulator for Decentraland streaming",
-  "main": "dist/c64-emulator.js",
+  "description": "MIT-licensed C64 emulator with WebSocket streaming for Decentraland",
+  "main": "src/emulator/C64Emulator.js",
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "build": "webpack",
-    "dev": "webpack serve --open",
-    "test": "jest"
+    "start": "npm run dev",
+    "dev": "npx vite",
+    "build": "npx vite build",
+    "preview": "npx vite preview",
+    "bridge": "node src/streaming/websocket-bridge.js",
+    "test": "node test/basic-test.js",
+    "download-roms": "node scripts/download-roms.js",
+    "serve": "npx http-server -S -C cert.pem -K key.pem -p 8080"
   },
   "repository": {
     "type": "git",
@@ -19,13 +24,25 @@
     "emulator",
     "decentraland",
     "websocket",
-    "nft",
-    "metaverse"
+    "streaming",
+    "retro"
   ],
   "author": "gtrgit",
   "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/gtrgit/c64-emulator-decentraland/issues"
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2",
+    "cors": "^2.8.5"
   },
-  "homepage": "https://github.com/gtrgit/c64-emulator-decentraland#readme"
+  "optionalDependencies": {
+    "canvas": "^2.11.2"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "http-server": "^14.1.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
 }
