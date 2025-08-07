@@ -1,0 +1,31 @@
+{
+  "name": "c64-emulator-decentraland",
+  "version": "0.1.0",
+  "description": "MIT-licensed C64 emulator for Decentraland streaming",
+  "main": "dist/c64-emulator.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "webpack",
+    "dev": "webpack serve --open",
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gtrgit/c64-emulator-decentraland.git"
+  },
+  "keywords": [
+    "c64",
+    "commodore",
+    "emulator",
+    "decentraland",
+    "websocket",
+    "nft",
+    "metaverse"
+  ],
+  "author": "gtrgit",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/gtrgit/c64-emulator-decentraland/issues"
+  },
+  "homepage": "https://github.com/gtrgit/c64-emulator-decentraland#readme"
+}
