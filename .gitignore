@@ -1,4 +1,38 @@
+# Dependencies
 node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+*.min.js
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Environment
+.env
+.env.local
+
+# Original C64 ROMs (copyrighted - never commit!)
+roms/original/
 *.rom
 *.bin
-.env
+
+# Certificates (for local testing)
+*.pem
+*.key
+*.crt
+EOF
