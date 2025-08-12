@@ -1,9 +1,9 @@
-// CIA.js - COMPLETE CONSISTENT VERSION
-// This fixes the keyQueue/pendingKeys inconsistency
+// FIX 1: Update CIA.js with working keyboard implementation
+// CIA.js - Replace the typeChar and add keyboard processing
 
 export class CIA {
     constructor(chipNumber, memory) {
-        this.chipNumber = chipNumber; // 1 or 2
+        this.chipNumber = chipNumber;
         this.memory = memory;
         this.registers = new Uint8Array(16);
         
@@ -15,11 +15,12 @@ export class CIA {
         this.timerARunning = false;
         this.timerBRunning = false;
         
-        // Keyboard matrix (CIA 1)
-        this.keyMatrix = new Array(8).fill(0xFF);
+        // Keyboard matrix (CIA 1) - 8x8 matrix
+        this.keyMatrix = new Uint8Array(8);
+        this.keyMatrix.fill(0xFF); // No keys pressed
         
-        // CONSISTENT: Use keyQueue throughout
-        this.keyQueue = [];  // <-- DEFINE IT HERE in constructor
+        // For CIA1: Keyboard queue
+        this.keyQueue = [];
         
         // Joystick state
         this.joystickState = {
@@ -41,7 +42,7 @@ export class CIA {
         this.timerB = 0xFFFF;
         this.timerARunning = false;
         this.timerBRunning = false;
-        this.keyQueue = [];  // <-- RESET IT HERE
+        this.keyQueue = [];
     }
     
     // This needs to be called every frame!
@@ -78,12 +79,11 @@ export class CIA {
     }
     
     typeChar(char) {
-        // Stub for keyboard input
-        console.log('CIA: Key typed:', char);
+        if (this.chipNumber !== 1) return;
         
         // Convert to PETSCII and add to queue
         const petscii = this.charToPETSCII(char);
-        this.keyQueue.push(petscii);  // <-- USE keyQueue, NOT pendingKeys
+        this.keyQueue.push(petscii);
         
         console.log(`Queued char '${char}' as PETSCII 0x${petscii.toString(16)}`);
     }
@@ -103,23 +103,9 @@ export class CIA {
             return code; // Already uppercase
         }
         
-        // Numbers 0-9
-        if (code >= 48 && code <= 57) {
+        // Numbers and common symbols match ASCII
+        if (code >= 32 && code <= 95) {
             return code;
-        }
-        
-        // Common symbols that match ASCII
-        const symbols = {
-            '!': 0x21, '"': 0x22, '#': 0x23, '$': 0x24,
-            '%': 0x25, '&': 0x26, "'": 0x27, '(': 0x28,
-            ')': 0x29, '*': 0x2A, '+': 0x2B, ',': 0x2C,
-            '-': 0x2D, '.': 0x2E, '/': 0x2F, ':': 0x3A,
-            ';': 0x3B, '<': 0x3C, '=': 0x3D, '>': 0x3E,
-            '?': 0x3F, '@': 0x40
-        };
-        
-        if (symbols[char]) {
-            return symbols[char];
         }
         
         return 0x20; // Default to space
@@ -131,7 +117,7 @@ export class CIA {
         // CIA 1 - Keyboard and Joystick
         if (this.chipNumber === 1) {
             if (reg === 0x00) { // Port A - keyboard columns
-                return 0xFF; // No keys pressed
+                return 0xFF; // No keys pressed (for now)
             }
             if (reg === 0x01) { // Port B - keyboard rows / joystick
                 let value = 0xFF;
@@ -183,7 +169,8 @@ export class CIA {
                 this.timerA = this.timerALatch;
                 // Trigger interrupt if enabled
                 if (this.chipNumber === 1 && this.onIRQ) {
-                    // this.onIRQ(); // Uncomment when ready
+                    // Timer A underflow - trigger IRQ
+                    // this.onIRQ(); // Commented out to avoid too many IRQs
                 }
             }
         }

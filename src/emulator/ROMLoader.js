@@ -1,220 +1,164 @@
-// ROMLoader.js - Load MEGA65 Open ROMs (GPL3, commercial-use compatible)
-// These are clean-room implementations that avoid Commodore copyright
-
+// ROMLoader.js - Updated for Generic Open ROMs from GitHub
 export class ROMLoader {
     static async loadMEGA65() {
-        console.log('Loading MEGA65 Open ROMs (GPL3 licensed)...');
+        console.log('Loading Generic C64 Open ROMs...');
         
         try {
-            // Try to load from local files first
-            const roms = await this.loadFromFiles();
-            if (roms) return roms;
-        } catch (e) {
-            console.log('Local ROMs not found, using embedded minimal ROMs');
+            // Try to load the generic ROM files
+            const [basicResp, kernalResp, charResp] = await Promise.all([
+                fetch('/roms/mega65/basic_generic.rom'),
+                fetch('/roms/mega65/kernal_generic.rom'),
+                fetch('/roms/mega65/chargen_openroms.rom')
+            ]);
+            
+            if (basicResp.ok && kernalResp.ok && charResp.ok) {
+                const basic = new Uint8Array(await basicResp.arrayBuffer());
+                const kernal = new Uint8Array(await kernalResp.arrayBuffer());
+                const charset = new Uint8Array(await charResp.arrayBuffer());
+                
+                console.log('✅ Generic Open ROMs loaded successfully!');
+                console.log(`  BASIC: ${basic.length} bytes`);
+                console.log(`  KERNAL: ${kernal.length} bytes`);
+                console.log(`  CHARGEN: ${charset.length} bytes`);
+                
+                // Verify this is the generic version
+                if (basic.length === 8192 && kernal.length === 8192) {
+                    console.log('  ROM Type: Generic C64 Open ROMs');
+                    console.log('  Compatibility: Standard C64');
+                }
+                
+                return { basic, kernal, charset };
+            }
+        } catch (error) {
+            console.log('Failed to load Generic ROMs:', error);
         }
         
-        // Fallback: Use minimal embedded ROM for testing
-        return this.getMinimalTestROMs();
-    }
-    
-    static async loadFromFiles() {
-        const baseUrl = '/roms/mega65/';
-        
-        const responses = await Promise.all([
-            fetch(baseUrl + 'mega65.rom'),     // Combined ROM
-            fetch(baseUrl + 'chargen.rom')     // Character ROM
-        ]);
-        
-        if (!responses.every(r => r.ok)) {
-            throw new Error('Failed to load ROM files');
+        // Fallback: Try alternative character ROM
+        try {
+            const [basicResp, kernalResp, charResp] = await Promise.all([
+                fetch('/roms/mega65/basic_generic.rom'),
+                fetch('/roms/mega65/kernal_generic.rom'),
+                fetch('/roms/mega65/chargen_pxlfont_2.3.rom')
+            ]);
+            
+            if (basicResp.ok && kernalResp.ok && charResp.ok) {
+                console.log('Using PXLfont character ROM variant');
+                return {
+                    basic: new Uint8Array(await basicResp.arrayBuffer()),
+                    kernal: new Uint8Array(await kernalResp.arrayBuffer()),
+                    charset: new Uint8Array(await charResp.arrayBuffer())
+                };
+            }
+        } catch (error) {
+            console.log('Alternative charset also failed');
         }
         
-        const [megaRom, charRom] = await Promise.all(
-            responses.map(r => r.arrayBuffer())
-        );
-        
-        // MEGA65 ROM layout:
-        // $8000-$BFFF: BASIC (16KB)
-        // $E000-$FFFF: KERNAL (8KB)
-        
-        const megaData = new Uint8Array(megaRom);
-        
-        return {
-            basic: megaData.slice(0x0000, 0x4000),    // 16KB BASIC
-            kernal: megaData.slice(0x6000, 0x8000),   // 8KB KERNAL
-            charset: new Uint8Array(charRom)          // 4KB charset
-        };
+        // Last resort: Use minimal test ROM
+        console.log('⚠️ Using minimal test ROM (no real BASIC)');
+        return this.createMinimalROM();
     }
     
-    static getMinimalTestROMs() {
-        // Minimal ROM implementation for testing
-        // This provides just enough to get a BASIC prompt
+    static createMinimalROM() {
+        console.log('Creating minimal ROM for testing...');
         
+        const basic = new Uint8Array(8192);
         const kernal = new Uint8Array(8192);
-        const basic = new Uint8Array(16384);
-        const charset = this.generateCharset();
+        const charset = new Uint8Array(4096);
         
-        // Minimal KERNAL vectors at $FFFA-$FFFF
-        // NMI vector
-        kernal[0x1FFA] = 0x00;
-        kernal[0x1FFB] = 0xFE;
+        // Fill with NOPs
+        basic.fill(0xEA);
+        kernal.fill(0xEA);
         
-        // RESET vector - point to minimal init
-        kernal[0x1FFC] = 0x00;
-        kernal[0x1FFD] = 0xFC;
-        
-        // IRQ vector
-        kernal[0x1FFE] = 0x00;
-        kernal[0x1FFF] = 0xFF;
-        
-        // Minimal RESET routine at $FC00
+        // Basic reset routine at $FC00 (offset 0x1C00 in kernal)
         const resetRoutine = [
-            0x78,       // SEI - disable interrupts
-            0xD8,       // CLD - clear decimal mode
-            0xA2, 0xFF, // LDX #$FF
-            0x9A,       // TXS - set stack pointer
-            0xA9, 0x37, // LDA #$37
-            0x85, 0x01, // STA $01 - set memory config
-            0xA9, 0x2F, // LDA #$2F
-            0x85, 0x00, // STA $00 - data direction
+            // Initialize screen
+            0xA9, 0x93,        // LDA #$93 (clear screen)
+            0x20, 0xD2, 0xFF,  // JSR $FFD2 (CHROUT)
             
-            // Clear screen
-            0xA9, 0x20, // LDA #$20 (space character)
-            0xA2, 0x00, // LDX #$00
-            // Loop at $FC10
-            0x9D, 0x00, 0x04, // STA $0400,X
-            0x9D, 0x00, 0x05, // STA $0500,X
-            0x9D, 0x00, 0x06, // STA $0600,X
-            0x9D, 0x00, 0x07, // STA $0700,X
-            0xE8,             // INX
-            0xD0, 0xF1,       // BNE loop
+            // Set colors
+            0xA9, 0x0E,        // LDA #$0E (light blue)
+            0x8D, 0x86, 0x02,  // STA $0286 (current color)
             
-            // Set screen colors
-            0xA9, 0x0E, // LDA #$0E (light blue)
-            0xA2, 0x00, // LDX #$00
-            // Loop at $FC24
-            0x9D, 0x00, 0xD8, // STA $D800,X
-            0x9D, 0x00, 0xD9, // STA $D900,X
-            0x9D, 0x00, 0xDA, // STA $DA00,X
-            0x9D, 0x00, 0xDB, // STA $DB00,X
-            0xE8,             // INX
-            0xD0, 0xF1,       // BNE loop
+            0xA9, 0x06,        // LDA #$06 (blue)
+            0x8D, 0x20, 0xD0,  // STA $D020 (border)
+            0x8D, 0x21, 0xD0,  // STA $D021 (background)
             
-            // Display ready message
-            0xA9, 0x52, // LDA #'R'
-            0x8D, 0x00, 0x04, // STA $0400
-            0xA9, 0x45, // LDA #'E'
-            0x8D, 0x01, 0x04, // STA $0401
-            0xA9, 0x41, // LDA #'A'
-            0x8D, 0x02, 0x04, // STA $0402
-            0xA9, 0x44, // LDA #'D'
-            0x8D, 0x03, 0x04, // STA $0403
-            0xA9, 0x59, // LDA #'Y'
-            0x8D, 0x04, 0x04, // STA $0404
-            0xA9, 0x2E, // LDA #'.'
-            0x8D, 0x05, 0x04, // STA $0405
+            // Print "READY."
+            0xA9, 0x52,        // LDA #'R'
+            0x20, 0xD2, 0xFF,  // JSR $FFD2
+            0xA9, 0x45,        // LDA #'E'
+            0x20, 0xD2, 0xFF,  // JSR $FFD2
+            0xA9, 0x41,        // LDA #'A'
+            0x20, 0xD2, 0xFF,  // JSR $FFD2
+            0xA9, 0x44,        // LDA #'D'
+            0x20, 0xD2, 0xFF,  // JSR $FFD2
+            0xA9, 0x59,        // LDA #'Y'
+            0x20, 0xD2, 0xFF,  // JSR $FFD2
+            0xA9, 0x2E,        // LDA #'.'
+            0x20, 0xD2, 0xFF,  // JSR $FFD2
             
             // Infinite loop
-            0x4C, 0x4D, 0xFC  // JMP $FC4D
+            0x4C, 0x00, 0xFC   // JMP $FC00
         ];
         
-        // Write reset routine to KERNAL ROM
+        // Copy reset routine
         for (let i = 0; i < resetRoutine.length; i++) {
             kernal[0x1C00 + i] = resetRoutine[i];
         }
         
-        // IRQ handler at $FF00 - just RTI
-        kernal[0x1F00] = 0x40; // RTI
+        // CHROUT routine at $FFD2 (simple version)
+        kernal[0x1FD2] = 0x8D;  // STA $0400,X
+        kernal[0x1FD3] = 0x00;
+        kernal[0x1FD4] = 0x04;
+        kernal[0x1FD5] = 0xE8;  // INX
+        kernal[0x1FD6] = 0x60;  // RTS
         
-        // NMI handler at $FE00 - just RTI  
-        kernal[0x1E00] = 0x40; // RTI
+        // Set vectors
+        kernal[0x1FFC] = 0x00;  // Reset vector low
+        kernal[0x1FFD] = 0xFC;  // Reset vector high
+        kernal[0x1FFE] = 0x00;  // IRQ vector low
+        kernal[0x1FFF] = 0xFC;  // IRQ vector high
+        kernal[0x1FFA] = 0x00;  // NMI vector low
+        kernal[0x1FFB] = 0xFC;  // NMI vector high
         
-        console.log('Using minimal test ROMs - full MEGA65 ROMs recommended');
-        
-        return { kernal, basic, charset };
-    }
-    
-    static generateCharset() {
-        // Generate a basic charset for testing
-        // This creates a simple 8x8 font for ASCII characters
-        
-        const charset = new Uint8Array(4096);
-        
-        // Basic uppercase letters A-Z (PETSCII 1-26)
-        const basicFont = {
-            // A
-            1: [0x18, 0x3C, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x00],
-            // B
-            2: [0x7C, 0x66, 0x66, 0x7C, 0x66, 0x66, 0x7C, 0x00],
-            // C
-            3: [0x3C, 0x66, 0x60, 0x60, 0x60, 0x66, 0x3C, 0x00],
-            // D
-            4: [0x78, 0x6C, 0x66, 0x66, 0x66, 0x6C, 0x78, 0x00],
-            // E
-            5: [0x7E, 0x60, 0x60, 0x78, 0x60, 0x60, 0x7E, 0x00],
-            // ... Add more as needed
-            
-            // Space (32)
-            32: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            
-            // Period (46)
-            46: [0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00],
-        };
-        
-        // Map PETSCII codes to character data
-        const petsciiMap = {
-            0x20: 32,  // Space
-            0x2E: 46,  // Period
-            0x41: 1,   // A
-            0x42: 2,   // B
-            0x43: 3,   // C
-            0x44: 4,   // D
-            0x45: 5,   // E
-            0x52: 1,   // R (reuse A pattern for now)
-            0x59: 1,   // Y (reuse A pattern for now)
-        };
-        
-        // Fill charset with character patterns
-        for (const [petscii, fontIndex] of Object.entries(petsciiMap)) {
-            const charData = basicFont[fontIndex] || basicFont[32]; // Default to space
-            const offset = parseInt(petscii) * 8;
-            
+        // Create basic character set (ASCII-like)
+        // Each character is 8 bytes
+        const createChar = (pattern) => {
+            const result = new Uint8Array(8);
             for (let i = 0; i < 8; i++) {
-                charset[offset + i] = charData[i];
+                result[i] = pattern[i] || 0;
             }
-        }
+            return result;
+        };
         
-        // Fill in a default pattern for undefined characters
-        const defaultPattern = [0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x7E, 0x00];
-        for (let c = 0; c < 256; c++) {
-            const offset = c * 8;
-            if (charset[offset] === 0 && charset[offset + 1] === 0) {
-                for (let i = 0; i < 8; i++) {
-                    charset[offset + i] = defaultPattern[i];
-                }
-            }
-        }
+        // Add some basic characters
+        // Space (char 32)
+        for (let i = 0; i < 8; i++) charset[32 * 8 + i] = 0x00;
         
-        return charset;
-    }
-    
-    // Helper to download and prepare official MEGA65 ROMs
-    static async downloadMEGA65() {
-        console.log(`
-To use official MEGA65 Open ROMs:
-
-1. Clone the MEGA65 repository:
-   git clone https://github.com/MEGA65/open-roms.git
-
-2. Build the ROMs:
-   cd open-roms
-   make
-
-3. Copy the generated ROM files to your project:
-   cp mega65.rom ../path/to/your/project/public/roms/mega65/
-   cp chargen.rom ../path/to/your/project/public/roms/mega65/
-
-These ROMs are GPL3 licensed and safe for commercial use.
-        `);
+        // 'A' (char 65)
+        const charA = [0x18, 0x3C, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x00];
+        for (let i = 0; i < 8; i++) charset[65 * 8 + i] = charA[i];
+        
+        // 'D' (char 68)
+        const charD = [0x78, 0x6C, 0x66, 0x66, 0x66, 0x6C, 0x78, 0x00];
+        for (let i = 0; i < 8; i++) charset[68 * 8 + i] = charD[i];
+        
+        // 'E' (char 69)
+        const charE = [0x7E, 0x60, 0x60, 0x78, 0x60, 0x60, 0x7E, 0x00];
+        for (let i = 0; i < 8; i++) charset[69 * 8 + i] = charE[i];
+        
+        // 'R' (char 82)
+        const charR = [0x7C, 0x66, 0x66, 0x7C, 0x78, 0x6C, 0x66, 0x00];
+        for (let i = 0; i < 8; i++) charset[82 * 8 + i] = charR[i];
+        
+        // 'Y' (char 89)
+        const charY = [0x66, 0x66, 0x66, 0x3C, 0x18, 0x18, 0x18, 0x00];
+        for (let i = 0; i < 8; i++) charset[89 * 8 + i] = charY[i];
+        
+        // '.' (char 46)
+        const charDot = [0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00];
+        for (let i = 0; i < 8; i++) charset[46 * 8 + i] = charDot[i];
+        
+        return { basic, kernal, charset };
     }
 }

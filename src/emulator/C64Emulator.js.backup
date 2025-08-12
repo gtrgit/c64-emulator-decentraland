@@ -1,0 +1,258 @@
+// C64Emulator.js - Complete emulator class
+import { MOS6502 } from './MOS6502.js';
+import { Memory } from './Memory.js';
+import { VIC2 } from './VIC2.js';
+import { SID } from './SID.js';
+import { CIA } from './CIA.js';
+import { ROMLoader } from './ROMLoader.js';
+
+export class C64Emulator {
+    constructor(config = {}) {
+        console.log('Creating C64 Emulator instance...');
+        
+        // Core components
+        this.memory = new Memory();
+        this.cpu = new MOS6502(this.memory);
+        this.vic = new VIC2(this.memory);
+        this.sid = new SID();
+        
+        // Configuration
+        this.canvas = config.canvas || document.getElementById('screen');
+        this.streamingEnabled = config.streaming || false;
+        this.gamepadEnabled = config.gamepad || false;
+        
+        // Emulation state
+        this.running = false;
+        this.frameCount = 0;
+        this.cyclesPerFrame = 19656; // PAL: 985248 cycles/sec ÷ 50 fps
+        this.frameTimer = null;
+        
+        // Performance tracking
+        this.lastFrameTime = 0;
+        this.fps = 0;
+    }
+    
+    async init() {
+        console.log('Initializing C64 Emulator...');
+        
+        // Load ROMs
+        await this.loadROMs();
+        
+        // Initialize components
+        this.cpu.reset();
+        this.vic.reset();
+        
+        // Set up interrupts
+        this.setupInterrupts();
+        
+        console.log('✅ Emulator initialized');
+    }
+    
+    async loadROMs() {
+        try {
+            console.log('Loading ROMs...');
+            const roms = await ROMLoader.loadMEGA65();
+            
+            // Load BASIC ROM at $A000-$BFFF
+            console.log('Loading BASIC ROM at $A000...');
+            for (let i = 0; i < 0x2000; i++) {
+                this.memory.write(0xA000 + i, roms.basic[i]);
+            }
+            
+            // Load KERNAL ROM at $E000-$FFFF
+            console.log('Loading KERNAL ROM at $E000...');
+            for (let i = 0; i < 0x2000; i++) {
+                this.memory.write(0xE000 + i, roms.kernal[i]);
+            }
+            
+            // Load character ROM for VIC-II
+            console.log('Loading character ROM...');
+            this.charROM = roms.charset;
+            this.vic.setCharROM(roms.charset);
+            
+            // Verify reset vector
+            const resetLow = this.memory.read(0xFFFC);
+            const resetHigh = this.memory.read(0xFFFD);
+            const resetVector = (resetHigh << 8) | resetLow;
+            console.log(`Reset vector: $${resetVector.toString(16).toUpperCase()}`);
+            
+            // Initialize memory configuration
+            this.memory.write(0x0000, 0x2F); // Data direction register
+            this.memory.write(0x0001, 0x37); // Memory configuration (BASIC + KERNAL visible)
+            
+        } catch (error) {
+            console.error('Failed to load ROMs:', error);
+            throw error;
+        }
+    }
+    
+    setupInterrupts() {
+        // Set up raster interrupt for VIC
+        this.vic.onRasterIRQ = () => {
+            if (!this.cpu.I) { // If interrupts enabled
+                this.cpu.irq();
+            }
+        };
+    }
+    
+    start() {
+        if (this.running) return;
+        
+        console.log('Starting emulation...');
+        this.running = true;
+        this.lastFrameTime = performance.now();
+        this.runFrame();
+    }
+    
+    pause() {
+        console.log('Pausing emulation...');
+        this.running = false;
+        if (this.frameTimer) {
+            cancelAnimationFrame(this.frameTimer);
+            this.frameTimer = null;
+        }
+    }
+    
+    reset() {
+        console.log('Resetting emulator...');
+        
+        // Reset all components
+        this.cpu.reset();
+        this.vic.reset();
+        this.memory.reset();
+        
+        // Clear screen
+        for (let i = 0x0400; i < 0x07E8; i++) {
+            this.memory.write(i, 0x20); // Space character
+        }
+        
+        // Reset color RAM
+        for (let i = 0xD800; i < 0xDBE8; i++) {
+            this.memory.write(i, 0x0E); // Light blue
+        }
+        
+        console.log('Reset complete');
+    }
+    
+    runFrame() {
+        if (!this.running) return;
+        
+        // Run CPU for one frame worth of cycles
+        let cycles = 0;
+        const targetCycles = this.cyclesPerFrame;
+        
+        while (cycles < targetCycles && this.running) {
+            try {
+                // Execute one instruction
+                const instructionCycles = this.cpu.step();
+                cycles += instructionCycles;
+                
+                // Update other components
+                for (let i = 0; i < instructionCycles; i++) {
+                    this.vic.cycle();
+                    this.memory.cycle(); // Updates CIAs
+                }
+                
+            } catch (error) {
+                console.error('CPU error at PC=$' + this.cpu.PC.toString(16), error);
+                this.running = false;
+                break;
+            }
+        }
+        
+        // Render frame
+        this.vic.render();
+        
+        // Update FPS counter
+        this.updateFPS();
+        
+        // Schedule next frame
+        this.frameTimer = requestAnimationFrame(() => this.runFrame());
+    }
+    
+    updateFPS() {
+        this.frameCount++;
+        const now = performance.now();
+        const delta = now - this.lastFrameTime;
+        
+        if (delta >= 1000) {
+            this.fps = Math.round((this.frameCount * 1000) / delta);
+            this.frameCount = 0;
+            this.lastFrameTime = now;
+            
+            // Update UI if exists
+            const fpsElement = document.getElementById('fps');
+            if (fpsElement) {
+                fpsElement.textContent = this.fps + ' FPS';
+            }
+        }
+    }
+    
+    // Load a PRG file
+    loadPRG(data) {
+        if (data.length < 2) {
+            console.error('Invalid PRG file');
+            return;
+        }
+        
+        // First two bytes are load address (little-endian)
+        const loadAddr = data[0] | (data[1] << 8);
+        console.log(`Loading PRG at $${loadAddr.toString(16)}`);
+        
+        // Copy program data to memory
+        for (let i = 2; i < data.length; i++) {
+            this.memory.write(loadAddr + i - 2, data[i]);
+        }
+        
+        // Set BASIC pointers (for BASIC programs)
+        if (loadAddr === 0x0801) {
+            // Update BASIC start of variables pointer
+            const endAddr = loadAddr + data.length - 2;
+            this.memory.write(0x2D, endAddr & 0xFF);
+            this.memory.write(0x2E, (endAddr >> 8) & 0xFF);
+            
+            console.log('BASIC program loaded, type RUN to execute');
+        }
+    }
+    
+    // Enable WebSocket streaming
+    enableStreaming() {
+        if (!this.streamingAdapter) {
+            import('./StreamingAdapter.js').then(module => {
+                this.streamingAdapter = new module.StreamingAdapter(this);
+                this.streamingAdapter.connect();
+                this.streamingEnabled = true;
+                console.log('Streaming enabled');
+            });
+        }
+    }
+    
+    // Public method for debugging
+    getState() {
+        return {
+            cpu: {
+                PC: this.cpu.PC,
+                A: this.cpu.A,
+                X: this.cpu.X,
+                Y: this.cpu.Y,
+                SP: this.cpu.SP,
+                flags: {
+                    N: this.cpu.N,
+                    V: this.cpu.V,
+                    B: this.cpu.B,
+                    D: this.cpu.D,
+                    I: this.cpu.I,
+                    Z: this.cpu.Z,
+                    C: this.cpu.C
+                }
+            },
+            vic: {
+                borderColor: this.vic.registers[0x20],
+                backgroundColor: this.vic.registers[0x21],
+                scanline: this.vic.currentScanline
+            },
+            running: this.running,
+            fps: this.fps
+        };
+    }
+}

@@ -4,8 +4,7 @@
 export class VIC2 {
     constructor(memory) {
         this.memory = memory;
-        // this.canvas = document.createElement('canvas');
-        this.canvas = document.getElementById('screen') || document.createElement('canvas');
+        this.canvas = document.createElement('canvas');
         this.canvas.width = 384;  // Including border (320 + 64)
         this.canvas.height = 272;  // Including border (200 + 72)
         this.ctx = this.canvas.getContext('2d');
@@ -57,13 +56,6 @@ export class VIC2 {
         this.charGenMemory = 0xD000; // Character generator ROM
         this.colorMemory = 0xD800;   // Color RAM
         
-        // Cursor properties
-        this.cursorVisible = true;
-        this.cursorBlinkCounter = 0;
-        this.cursorBlinkRate = 25; // Blink every 25 frames (~2Hz at 50fps)
-        this.cursorX = 0;  // Column position (0-39)
-        this.cursorY = 1;  // Row position (0-24) - Start at row 1 after READY
-
         // Initialize screen
         this.clearScreen();
     }
@@ -95,11 +87,6 @@ export class VIC2 {
         this.registers[0x18] = 0x14; // Memory pointers
         this.registers[0x20] = 0x0E; // Border color (light blue)
         this.registers[0x21] = 0x06; // Background color (blue)
-        // Reset cursor to position after READY.
-        this.cursorX = 0;
-        this.cursorY = 1;  // Next line after READY
-        this.cursorVisible = true;
-        this.cursorBlinkCounter = 0;
     }
     
     setCanvas(externalCanvas) {
@@ -115,38 +102,55 @@ export class VIC2 {
     }
 
     // FIXED cycle() method from console command that worked
-    cycle() {
-        this.cycleCounter++;
+    // cycle() {
+    //     this.cycleCounter++;
         
-        // End of line?
-        if (this.cycleCounter >= this.cyclesPerLine) {
-            this.cycleCounter = 0;
-            this.rasterY++;
+    //     // End of line?
+    //     if (this.cycleCounter >= this.cyclesPerLine) {
+    //         this.cycleCounter = 0;
+    //         this.rasterY++;
             
-            // Render visible lines as we go (optional optimization)
-            if (this.rasterY >= 50 && this.rasterY < 250) {
-                // We're in the visible area
-                if (this.rasterY === 50) {
-                    // Start of visible area - clear screen once
-                    if (this.ctx) {
-                        // Draw border
-                        this.drawBorder();
-                    }
-                }
-            }
+    //         // Render visible lines as we go (optional optimization)
+    //         if (this.rasterY >= 50 && this.rasterY < 250) {
+    //             // We're in the visible area
+    //             if (this.rasterY === 50) {
+    //                 // Start of visible area - clear screen once
+    //                 if (this.ctx) {
+    //                     // Draw border
+    //                     this.drawBorder();
+    //                 }
+    //             }
+    //         }
             
-            // End of frame?
-            if (this.rasterY >= this.maxRasterY) {
-                this.rasterY = 0;
-                // Render the complete frame
-                this.updateCursor();  // ADD THIS LINE
-                this.renderFrame();
-            }
+    //         // End of frame?
+    //         if (this.rasterY >= this.maxRasterY) {
+    //             this.rasterY = 0;
+    //             // Render the complete frame
+    //             this.renderFrame();
+    //         }
             
-            // Check for raster interrupt
-            this.checkRasterIRQ();
+    //         // Check for raster interrupt
+    //         this.checkRasterIRQ();
+    //     }
+    // }
+    cycle() {
+    this.cycleCounter++;
+    // console.log('this.cycleCounter:'+this.cycleCounter+ 'this.cyclesPerLine '+this.cyclesPerLine)
+    // End of line?
+    if (this.cycleCounter >= this.cyclesPerLine) {
+        this.cycleCounter = 0;
+        this.rasterY++;
+        
+        // End of frame?
+        if (this.rasterY >= this.maxRasterY) {
+            this.rasterY = 0;
+            this.renderFrame();
         }
+        
+        // Check for raster interrupt
+        this.checkRasterIRQ();
     }
+}
 
     drawBorder() {
         const borderColor = this.palette[this.registers[0x20] & 0x0F];
@@ -255,192 +259,31 @@ export class VIC2 {
     //             }
     //         }
     //     }
-    //     // Draw cursor if visible
-    //     if (this.cursorVisible) {
-    //         // Get cursor color from color RAM at cursor position
-    //         const cursorColorIndex = this.memory.read(0xD800 + (this.cursorY * 40 + this.cursorX)) & 0x0F;
-    //         const cursorColor = colors[cursorColorIndex || 14]; // Default to light blue
-            
-    //         // Calculate pixel position
-    //         const cursorPixelX = 32 + (this.cursorX * 8);  // 32 = border width
-    //         const cursorPixelY = 35 + (this.cursorY * 8);  // 35 = border height
-            
-    //         // Draw cursor as solid rectangle (C64 style)
-    //         this.ctx.fillStyle = '#' + cursorColor.toString(16).padStart(6, '0');
-    //         this.ctx.fillRect(cursorPixelX, cursorPixelY, 8, 8);
-    //     }
     // }
+
     renderFrame() {
         if (!this.ctx) {
-            this.ctx = document.getElementById('screen').getContext('2d');
-            this.canvas = document.getElementById('screen');
+            this.ctx = this.canvas.getContext('2d');
         }
         
-        // C64 colors
-        const colors = [
-            0x000000, 0xFFFFFF, 0x880000, 0xAAFFEE,
-            0xCC44CC, 0x00CC55, 0x0000AA, 0xEEEE77,
-            0xDD8855, 0x664400, 0xFF7777, 0x333333,
-            0x777777, 0xAAFF66, 0x0088FF, 0xBBBBBB
-        ];
+        // Draw border
+        this.drawBorder();
         
-        // Get screen settings
-        const borderColor = colors[this.registers[0x20] & 0x0F] || colors[14];
-        const bgColor = colors[this.registers[0x21] & 0x0F] || colors[6];
-        const screenMemory = ((this.registers[0x18] & 0xF0) >> 4) * 0x400;
+        // Determine graphics mode
+        const ctrl1 = this.registers[0x11];
+        this.textMode = !(ctrl1 & 0x20);
+        this.bitmapMode = !!(ctrl1 & 0x20);
         
-        // Clear with border color
-        this.ctx.fillStyle = '#' + borderColor.toString(16).padStart(6, '0');
-        this.ctx.fillRect(0, 0, 384, 272);
-        
-        // Draw background
-        this.ctx.fillStyle = '#' + bgColor.toString(16).padStart(6, '0');
-        this.ctx.fillRect(32, 35, 320, 200);
-        
-        // Render text characters using CHARACTER ROM
-        for (let row = 0; row < 25; row++) {
-            for (let col = 0; col < 40; col++) {
-                const charIndex = row * 40 + col;
-                const screenCode = this.memory.read(screenMemory + charIndex);
-                
-                // Skip spaces (0x20)
-                if (screenCode === 0x20) continue;
-                
-                // Get color from color RAM
-                const colorCode = this.memory.read(0xD800 + charIndex) & 0x0F;
-                const color = colors[colorCode || 14];
-                this.ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
-                
-                // Get character pattern from CHARACTER ROM
-                // Each character is 8 bytes in the charset
-                const charDataOffset = screenCode * 8;
-                
-                // Draw the character pixel by pixel
-                for (let cy = 0; cy < 8; cy++) {
-                    // Read byte from character ROM
-                    let charByte;
-                    
-                    // Check if we have charset data loaded
-                    if (this.memory.charset && this.memory.charset.length > charDataOffset + cy) {
-                        charByte = this.memory.charset[charDataOffset + cy];
-                    } else {
-                        // Fallback: create simple patterns for essential characters
-                        charByte = this.getFallbackCharPattern(screenCode, cy);
-                    }
-                    
-                    // Draw the 8 pixels of this row
-                    for (let cx = 0; cx < 8; cx++) {
-                        if (charByte & (0x80 >> cx)) {
-                            this.ctx.fillRect(
-                                32 + col * 8 + cx,
-                                35 + row * 8 + cy,
-                                1, 1
-                            );
-                        }
-                    }
-                }
-            }
+        if (this.textMode) {
+            this.renderTextMode();
         }
         
-        // Draw cursor if visible (at the end so it's on top)
-        if (this.cursorVisible) {
-            const cursorColorIndex = this.memory.read(0xD800 + (this.cursorY * 40 + this.cursorX)) & 0x0F;
-            const cursorColor = colors[cursorColorIndex || 14];
-            
-            const cursorPixelX = 32 + (this.cursorX * 8);
-            const cursorPixelY = 35 + (this.cursorY * 8);
-            
-            this.ctx.fillStyle = '#' + cursorColor.toString(16).padStart(6, '0');
-            this.ctx.fillRect(cursorPixelX, cursorPixelY, 8, 8);
-        }
+        // Update sprites
+        this.updateSprites();
+        
+        // Put the image data to canvas
+        this.ctx.putImageData(this.imageData, 0, 0);
     }
-
-
-    // Add this helper method to VIC2 class for fallback patterns
-    getFallbackCharPattern(screenCode, row) {
-        // Basic patterns for common characters as fallback
-        // This is used if charset ROM isn't loaded properly
-        
-        const patterns = {
-            // Letters A-Z (screen codes 1-26)
-            0x01: [0x18,0x3C,0x66,0x7E,0x66,0x66,0x66,0x00], // A
-            0x02: [0x7C,0x66,0x66,0x7C,0x66,0x66,0x7C,0x00], // B
-            0x03: [0x3C,0x66,0x60,0x60,0x60,0x66,0x3C,0x00], // C
-            0x04: [0x78,0x6C,0x66,0x66,0x66,0x6C,0x78,0x00], // D
-            0x05: [0x7E,0x60,0x60,0x78,0x60,0x60,0x7E,0x00], // E
-            0x06: [0x7E,0x60,0x60,0x78,0x60,0x60,0x60,0x00], // F
-            0x07: [0x3C,0x66,0x60,0x6E,0x66,0x66,0x3C,0x00], // G
-            0x08: [0x66,0x66,0x66,0x7E,0x66,0x66,0x66,0x00], // H
-            0x09: [0x3C,0x18,0x18,0x18,0x18,0x18,0x3C,0x00], // I
-            0x0A: [0x1E,0x0C,0x0C,0x0C,0x0C,0x6C,0x38,0x00], // J
-            0x0B: [0x66,0x6C,0x78,0x70,0x78,0x6C,0x66,0x00], // K
-            0x0C: [0x60,0x60,0x60,0x60,0x60,0x60,0x7E,0x00], // L
-            0x0D: [0x63,0x77,0x7F,0x6B,0x63,0x63,0x63,0x00], // M
-            0x0E: [0x66,0x76,0x7E,0x7E,0x6E,0x66,0x66,0x00], // N
-            0x0F: [0x3C,0x66,0x66,0x66,0x66,0x66,0x3C,0x00], // O
-            0x10: [0x7C,0x66,0x66,0x7C,0x60,0x60,0x60,0x00], // P
-            0x11: [0x3C,0x66,0x66,0x66,0x66,0x3C,0x0E,0x00], // Q
-            0x12: [0x7C,0x66,0x66,0x7C,0x78,0x6C,0x66,0x00], // R
-            0x13: [0x3C,0x66,0x60,0x3C,0x06,0x66,0x3C,0x00], // S
-            0x14: [0x7E,0x18,0x18,0x18,0x18,0x18,0x18,0x00], // T
-            0x15: [0x66,0x66,0x66,0x66,0x66,0x66,0x3C,0x00], // U
-            0x16: [0x66,0x66,0x66,0x66,0x66,0x3C,0x18,0x00], // V
-            0x17: [0x63,0x63,0x63,0x6B,0x7F,0x77,0x63,0x00], // W
-            0x18: [0x66,0x66,0x3C,0x18,0x3C,0x66,0x66,0x00], // X
-            0x19: [0x66,0x66,0x66,0x3C,0x18,0x18,0x18,0x00], // Y
-            0x1A: [0x7E,0x06,0x0C,0x18,0x30,0x60,0x7E,0x00], // Z
-            
-            // Numbers 0-9 (screen codes 48-57)
-            0x30: [0x3C,0x66,0x6E,0x76,0x66,0x66,0x3C,0x00], // 0
-            0x31: [0x18,0x18,0x38,0x18,0x18,0x18,0x7E,0x00], // 1
-            0x32: [0x3C,0x66,0x06,0x0C,0x30,0x60,0x7E,0x00], // 2
-            0x33: [0x3C,0x66,0x06,0x1C,0x06,0x66,0x3C,0x00], // 3
-            0x34: [0x06,0x0E,0x1E,0x66,0x7F,0x06,0x06,0x00], // 4
-            0x35: [0x7E,0x60,0x7C,0x06,0x06,0x66,0x3C,0x00], // 5
-            0x36: [0x3C,0x66,0x60,0x7C,0x66,0x66,0x3C,0x00], // 6
-            0x37: [0x7E,0x66,0x0C,0x18,0x18,0x18,0x18,0x00], // 7
-            0x38: [0x3C,0x66,0x66,0x3C,0x66,0x66,0x3C,0x00], // 8
-            0x39: [0x3C,0x66,0x66,0x3E,0x06,0x66,0x3C,0x00], // 9
-            
-            // Special characters
-            0x21: [0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00], // !
-            0x2E: [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00], // .
-            0x2C: [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30], // ,
-            0x3A: [0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x00], // :
-            0x3B: [0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x30], // ;
-            0x3F: [0x3C,0x66,0x06,0x0C,0x18,0x00,0x18,0x00], // ?
-            0x28: [0x0C,0x18,0x30,0x30,0x30,0x18,0x0C,0x00], // (
-            0x29: [0x30,0x18,0x0C,0x0C,0x0C,0x18,0x30,0x00], // )
-            0x2B: [0x00,0x18,0x18,0x7E,0x18,0x18,0x00,0x00], // +
-            0x2D: [0x00,0x00,0x00,0x7E,0x00,0x00,0x00,0x00], // -
-            0x2F: [0x00,0x06,0x0C,0x18,0x30,0x60,0x00,0x00], // /
-            0x22: [0x66,0x66,0x66,0x00,0x00,0x00,0x00,0x00], // "
-            0x27: [0x18,0x18,0x18,0x00,0x00,0x00,0x00,0x00], // '
-            0x2A: [0x00,0x66,0x3C,0xFF,0x3C,0x66,0x00,0x00], // *
-            0x3D: [0x00,0x00,0x7E,0x00,0x7E,0x00,0x00,0x00], // =
-        };
-        
-        const pattern = patterns[screenCode];
-        if (pattern && pattern[row] !== undefined) {
-            return pattern[row];
-        }
-        
-        // Default: return empty for unknown characters
-        return 0x00;
-    }
-
-
-    updateCursor() {
-        // Increment blink counter
-        this.cursorBlinkCounter++;
-        
-        // Toggle visibility based on blink rate
-        if (this.cursorBlinkCounter >= this.cursorBlinkRate) {
-            this.cursorVisible = !this.cursorVisible;
-            this.cursorBlinkCounter = 0;
-        }
-    }
-
     renderTextMode() {
         const screenMemory = ((this.registers[0x18] & 0xF0) >> 4) * 0x400;
         const data = this.imageData.data;

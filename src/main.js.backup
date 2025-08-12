@@ -1,0 +1,121 @@
+// main.js - Complete emulator initialization
+import { C64Emulator } from './emulator/C64Emulator.js';
+import { ROMLoader } from './emulator/ROMLoader.js';
+
+// Global emulator instance
+let emulator = null;
+
+// Start emulator function
+async function startEmulator() {
+    console.log('=== Starting C64 Emulator ===');
+    
+    try {
+        // Create emulator instance
+        emulator = new C64Emulator({
+            canvas: document.getElementById('screen'),
+            streaming: false,
+            gamepad: false
+        });
+        
+        // Make emulator globally accessible for debugging
+        window.emulator = emulator;
+        
+        // Initialize (loads ROMs)
+        await emulator.init();
+        
+        // Start emulation
+        emulator.start();
+        
+        console.log('✅ Emulator started successfully');
+        
+        // Add UI button handlers
+        setupUIHandlers();
+        
+        return emulator;
+        
+    } catch (error) {
+        console.error('❌ Failed to start emulator:', error);
+        
+        // Show error on screen
+        const canvas = document.getElementById('screen');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#FF0000';
+            ctx.font = '20px monospace';
+            ctx.fillText('Error: ' + error.message, 10, 30);
+        }
+        
+        throw error;
+    }
+}
+
+// Setup UI handlers
+function setupUIHandlers() {
+    // Reset button
+    const resetBtn = document.getElementById('resetBtn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            console.log('Reset button clicked');
+            if (emulator) {
+                emulator.reset();
+            }
+        });
+    }
+    
+    // Pause button
+    const pauseBtn = document.getElementById('pauseBtn');
+    if (pauseBtn) {
+        pauseBtn.addEventListener('click', () => {
+            if (emulator) {
+                if (emulator.running) {
+                    emulator.pause();
+                    pauseBtn.textContent = 'Resume';
+                } else {
+                    emulator.start();
+                    pauseBtn.textContent = 'Pause';
+                }
+            }
+        });
+    }
+    
+    // Enable Streaming button
+    const streamBtn = document.getElementById('streamBtn');
+    if (streamBtn) {
+        streamBtn.addEventListener('click', () => {
+            if (emulator) {
+                emulator.enableStreaming();
+                streamBtn.textContent = 'Streaming Enabled';
+                streamBtn.disabled = true;
+            }
+        });
+    }
+    
+    // Load PRG button
+    const loadBtn = document.getElementById('loadBtn');
+    if (loadBtn) {
+        loadBtn.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.prg';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (file && emulator) {
+                    const buffer = await file.arrayBuffer();
+                    emulator.loadPRG(new Uint8Array(buffer));
+                }
+            };
+            input.click();
+        });
+    }
+}
+
+// Auto-start when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startEmulator);
+} else {
+    // DOM already loaded
+    startEmulator();
+}
+
+// Export for use in other modules
+export { startEmulator, emulator };

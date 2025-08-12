@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C64 Emulator - MIT Licensed</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #A8A8FF;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        h1 {
+            text-shadow: 0 0 10px #40318D;
+            margin-bottom: 20px;
+        }
+        
+        #emulator-container {
+            border: 4px solid #8B7355;
+            background: #40318D;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 30px rgba(139, 115, 85, 0.8);
+        }
+        
+        canvas {
+            width: 768px;
+            height: 544px;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            display: block;
+            background: #000;
+        }
+        
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        button {
+            background: #40318D;
+            color: #A8A8FF;
+            border: 2px solid #A8A8FF;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            background: #A8A8FF;
+            color: #40318D;
+            transform: scale(1.05);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background: rgba(0, 255, 0, 0.1);
+            border: 1px solid #0f0;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #0f0;
+            min-width: 600px;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+        }
+        
+        .license-info {
+            margin-top: 20px;
+            padding: 10px;
+            background: rgba(255, 255, 0, 0.1);
+            border: 1px solid #ff0;
+            border-radius: 4px;
+            color: #ff0;
+            font-size: 11px;
+            max-width: 600px;
+        }
+        
+        #error-display {
+            color: #f00;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid #f00;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .loading {
+            color: #ff0;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <h1>🕹️ C64 Emulator - Clean MIT License</h1>
+    
+    <div id="emulator-container">
+        <canvas id="screen" width="384" height="272"></canvas>
+    </div>
+    
+    <div class="controls">
+        <button id="startBtn" onclick="startEmulator()">Start Emulator</button>
+        <button id="resetBtn" onclick="resetEmulator()" disabled>Reset</button>
+        <button id="pauseBtn" onclick="togglePause()" disabled>Pause</button>
+        <button id="streamBtn" onclick="toggleStreaming()" disabled>Enable Streaming</button>
+        <button id="loadBtn" onclick="loadTestProgram()" disabled>Load Test PRG</button>
+    </div>
+    
+    <div class="status">
+        <div class="status-grid">
+            <div>Status: <span id="status">Not Started</span></div>
+            <div>FPS: <span id="fps">0</span></div>
+            <div>Frame: <span id="frame">0</span></div>
+            <div>PC: $<span id="pc">0000</span></div>
+        </div>
+    </div>
+    
+    <div id="error-display"></div>
+    
+    <div class="license-info">
+        <strong>License Information:</strong><br>
+        • Emulator: MIT Licensed (based on c64js)<br>
+        • ROMs: MEGA65 Open ROMs (GPL3, commercial use allowed)<br>
+        • No Commodore copyrighted material included<br>
+        • WebSocket streaming ready for Decentraland integration
+    </div>
+
+    <script type="module">
+    // Import the necessary modules
+    import { C64Emulator } from './src/emulator/C64Emulator.js';
+    import { ROMLoader } from './src/emulator/ROMLoader.js';
+    
+    // Create global emulator variable
+    let emulator = null;
+    
+    // Define startEmulator function
+    async function startEmulator() {
+        try {
+            console.log('=== Starting C64 Emulator ===');
+            
+            // Check if already running
+            if (emulator && emulator.running) {
+                console.log('Emulator already running');
+                return emulator;
+            }
+            
+            // Create new emulator instance
+            emulator = new C64Emulator({
+                canvas: document.getElementById('screen')
+            });
+            
+            // Make globally accessible for debugging
+            window.emulator = emulator;
+            
+            // Initialize (loads ROMs)
+            await emulator.init();
+            
+            // Start emulation
+            emulator.start();
+            
+            console.log('✅ Emulator started successfully');
+            
+            // Update button
+            const btn = document.getElementById('startBtn');
+            if (btn) {
+                btn.textContent = 'Running';
+                btn.disabled = true;
+            }
+            
+            return emulator;
+            
+        } catch (error) {
+            console.error('❌ Failed to start emulator:', error);
+            alert('Failed to start emulator: ' + error.message);
+        }
+    }
+    
+    // Make startEmulator globally available
+    window.startEmulator = startEmulator;
+    
+    // Setup other button handlers
+    document.addEventListener('DOMContentLoaded', () => {
+        // Reset button
+        const resetBtn = document.getElementById('resetBtn');
+        if (resetBtn) {
+            resetBtn.onclick = () => {
+                if (emulator) {
+                    emulator.reset();
+                    console.log('Emulator reset');
+                }
+            };
+        }
+        
+        // Pause button
+        const pauseBtn = document.getElementById('pauseBtn');
+        if (pauseBtn) {
+            pauseBtn.onclick = () => {
+                if (emulator) {
+                    if (emulator.running) {
+                        emulator.pause();
+                        pauseBtn.textContent = 'Resume';
+                    } else {
+                        emulator.start();
+                        pauseBtn.textContent = 'Pause';
+                    }
+                }
+            };
+        }
+        
+        // Auto-start emulator
+        console.log('Auto-starting emulator...');
+        startEmulator();
+    });
+</script>
+</body>
+</html>

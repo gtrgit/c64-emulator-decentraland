@@ -13,6 +13,7 @@ const PORT = 3001;
 app.use(express.static('.'));
 app.use('/src', express.static('src'));
 app.use('/public', express.static('public'));
+app.use(express.static('public'));  // Add this line!
 
 // Default route
 app.get('/', (req, res) => {

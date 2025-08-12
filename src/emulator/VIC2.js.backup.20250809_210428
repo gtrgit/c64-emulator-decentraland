@@ -1,0 +1,491 @@
+// VIC2.js - VIC-II Video Interface Controller
+// Fixed: Renamed 'cycle' property to 'cycleCounter' to avoid conflict with cycle() method
+
+export class VIC2 {
+    constructor(memory) {
+        this.memory = memory;
+        this.canvas = document.createElement('canvas');
+        this.canvas.width = 384;  // Including border (320 + 64)
+        this.canvas.height = 272;  // Including border (200 + 72)
+        this.ctx = this.canvas.getContext('2d');
+        this.imageData = this.ctx.createImageData(384, 272);
+        
+        // Screen dimensions
+        this.screenWidth = 320;
+        this.screenHeight = 200;
+        this.borderWidth = 32;
+        this.borderHeight = 36;
+        
+        // VIC-II state - FIXED: renamed from 'cycle' to 'cycleCounter'
+        this.cycleCounter = 0;  // Current cycle in line
+        this.rasterY = 0;       // Current raster line
+        this.maxRasterY = 312;  // PAL: 312 lines
+        this.cyclesPerLine = 63; // PAL: 63 cycles per line
+        
+        // Registers (0xD000-0xD02E)
+        this.registers = new Uint8Array(64);
+        
+        // Sprites
+        this.sprites = new Array(8).fill(null).map(() => ({
+            enabled: false,
+            x: 0, 
+            y: 0,
+            expandX: false, 
+            expandY: false,
+            multicolor: false,
+            priority: false,
+            color: 0
+        }));
+        
+        // Colors
+        this.palette = [
+            0x000000, 0xFFFFFF, 0x880000, 0xAAFFEE,
+            0xCC44CC, 0x00CC55, 0x0000AA, 0xEEEE77,
+            0xDD8855, 0x664400, 0xFF7777, 0x333333,
+            0x777777, 0xAAFF66, 0x0088FF, 0xBBBBBB
+        ];
+        
+        // Graphics modes
+        this.textMode = true;
+        this.bitmapMode = false;
+        this.multicolorMode = false;
+        this.extendedColorMode = false;
+        
+        // Memory pointers
+        this.screenMemory = 0x0400;  // Default screen memory
+        this.charGenMemory = 0xD000; // Character generator ROM
+        this.colorMemory = 0xD800;   // Color RAM
+        
+        // Initialize screen
+        this.clearScreen();
+    }
+    
+    clearScreen() {
+        // Fill with border color (default light blue)
+        const borderColor = this.palette[14];
+        const data = this.imageData.data;
+        
+        for (let i = 0; i < data.length; i += 4) {
+            data[i] = (borderColor >> 16) & 0xFF;     // R
+            data[i + 1] = (borderColor >> 8) & 0xFF;  // G
+            data[i + 2] = borderColor & 0xFF;         // B
+            data[i + 3] = 255;                        // A
+        }
+        
+        this.ctx.putImageData(this.imageData, 0, 0);
+    }
+    
+    reset() {
+        this.cycleCounter = 0;  // FIXED: using cycleCounter
+        this.rasterY = 0;
+        this.registers.fill(0);
+        this.clearScreen();
+        
+        // Set default register values
+        this.registers[0x11] = 0x1B; // Control register 1
+        this.registers[0x16] = 0xC8; // Control register 2
+        this.registers[0x18] = 0x14; // Memory pointers
+        this.registers[0x20] = 0x0E; // Border color (light blue)
+        this.registers[0x21] = 0x06; // Background color (blue)
+    }
+    
+      setCanvas(externalCanvas) {
+        // Use external canvas if provided, otherwise use internal
+        if (externalCanvas) {
+            this.canvas = externalCanvas;
+            this.canvas.width = 384;  // Including border
+            this.canvas.height = 272; // Including border
+            this.ctx = this.canvas.getContext('2d');
+            this.imageData = this.ctx.createImageData(384, 272);
+            console.log('VIC2: Using external canvas');
+        }
+        // If no external canvas, we already created one in constructor
+    }
+
+    // FIXED: This is now the cycle() method without conflict
+    cycle() {
+        this.cycleCounter++;  // FIXED: using cycleCounter
+        
+        // End of line?
+        if (this.cycleCounter >= this.cyclesPerLine) {
+            this.cycleCounter = 0;  // FIXED: using cycleCounter
+            this.rasterY++;
+            
+            // End of frame?
+            if (this.rasterY >= this.maxRasterY) {
+                this.rasterY = 0;
+                this.renderFrame();
+            }
+            
+            // Check for raster interrupt
+            this.checkRasterIRQ();
+        }
+        
+        // Visible area rendering (once per line for simplicity)
+        if (this.cycleCounter === 0 && this.isVisibleLine()) {
+            this.renderLine();
+        }
+    }
+    
+    isVisibleLine() {
+        return this.rasterY >= 50 && this.rasterY < 250;
+    }
+    
+    renderLine() {
+        const y = this.rasterY - 50; // Adjust for visible area
+        
+        if (y >= 0 && y < this.screenHeight) {
+            if (this.textMode) {
+                this.renderTextLine(y);
+            } else if (this.bitmapMode) {
+                this.renderBitmapLine(y);
+            }
+        }
+    }
+    
+    renderTextLine(y) {
+        const row = Math.floor(y / 8);
+        const charLine = y % 8;
+        const data = this.imageData.data;
+        
+        for (let col = 0; col < 40; col++) {
+            const charIndex = row * 40 + col;
+            const charCode = this.memory.read(this.screenMemory + charIndex);
+            const colorCode = this.memory.read(this.colorMemory + charIndex) & 0x0F;
+            
+            // Get character data from ROM
+            const charData = this.memory.read(this.charGenMemory + charCode * 8 + charLine);
+            
+            // Render 8 pixels of the character
+            for (let bit = 0; bit < 8; bit++) {
+                const pixel = (charData >> (7 - bit)) & 1;
+                const color = pixel ? this.palette[colorCode] : this.palette[this.registers[0x21] & 0x0F];
+                
+                const x = col * 8 + bit;
+                const pixelOffset = ((y + this.borderHeight) * 384 + (x + this.borderWidth)) * 4;
+                
+                data[pixelOffset] = (color >> 16) & 0xFF;     // R
+                data[pixelOffset + 1] = (color >> 8) & 0xFF;  // G
+                data[pixelOffset + 2] = color & 0xFF;         // B
+                data[pixelOffset + 3] = 255;                  // A
+            }
+        }
+    }
+    
+    renderBitmapLine(y) {
+        // Bitmap mode rendering (simplified)
+        // TODO: Implement full bitmap mode
+    }
+    
+    // renderFrame() {
+    //     // Update sprites
+    //     this.updateSprites();
+        
+    //     // Draw border
+    //     this.drawBorder();
+        
+    //     // Update canvas
+    //     this.ctx.putImageData(this.imageData, 0, 0);
+    // }
+
+    
+    renderFrame() {
+        // Get current graphics mode from registers
+        const ctrl1 = this.registers[0x11];
+        const ctrl2 = this.registers[0x16];
+        
+        // Determine mode
+        this.textMode = !(ctrl1 & 0x20);
+        this.bitmapMode = !!(ctrl1 & 0x20);
+        this.multicolorMode = !!(ctrl2 & 0x10);
+        
+        // Draw border first
+        this.drawBorder();
+        
+        // Render the appropriate mode
+        if (this.textMode) {
+            this.renderTextMode();
+        } else if (this.bitmapMode) {
+            // Bitmap mode not implemented yet
+        }
+        
+        // Update sprites
+        this.updateSprites();
+        
+        // Put the image data to canvas
+        this.ctx.putImageData(this.imageData, 0, 0);
+    }
+    
+    drawBorder() {
+        const borderColor = this.palette[this.registers[0x20] & 0x0F];
+        const data = this.imageData.data;
+        
+        // Top and bottom borders
+        for (let y = 0; y < this.borderHeight; y++) {
+            for (let x = 0; x < 384; x++) {
+                // Top border
+                let offset = (y * 384 + x) * 4;
+                data[offset] = (borderColor >> 16) & 0xFF;
+                data[offset + 1] = (borderColor >> 8) & 0xFF;
+                data[offset + 2] = borderColor & 0xFF;
+                
+                // Bottom border
+                offset = ((272 - this.borderHeight + y) * 384 + x) * 4;
+                data[offset] = (borderColor >> 16) & 0xFF;
+                data[offset + 1] = (borderColor >> 8) & 0xFF;
+                data[offset + 2] = borderColor & 0xFF;
+            }
+        }
+        
+        // Left and right borders
+        for (let y = this.borderHeight; y < 272 - this.borderHeight; y++) {
+            for (let x = 0; x < this.borderWidth; x++) {
+                // Left border
+                let offset = (y * 384 + x) * 4;
+                data[offset] = (borderColor >> 16) & 0xFF;
+                data[offset + 1] = (borderColor >> 8) & 0xFF;
+                data[offset + 2] = borderColor & 0xFF;
+                
+                // Right border
+                offset = (y * 384 + (384 - this.borderWidth + x)) * 4;
+                data[offset] = (borderColor >> 16) & 0xFF;
+                data[offset + 1] = (borderColor >> 8) & 0xFF;
+                data[offset + 2] = borderColor & 0xFF;
+            }
+        }
+    }
+    
+    updateSprites() {
+        // Update sprite positions and properties from registers
+        for (let i = 0; i < 8; i++) {
+            const sprite = this.sprites[i];
+            sprite.x = this.registers[i * 2] | ((this.registers[0x10] & (1 << i)) ? 0x100 : 0);
+            sprite.y = this.registers[i * 2 + 1];
+            sprite.enabled = !!(this.registers[0x15] & (1 << i));
+            sprite.expandX = !!(this.registers[0x1D] & (1 << i));
+            sprite.expandY = !!(this.registers[0x17] & (1 << i));
+            sprite.multicolor = !!(this.registers[0x1C] & (1 << i));
+            sprite.priority = !!(this.registers[0x1B] & (1 << i));
+            sprite.color = this.registers[0x27 + i] & 0x0F;
+            
+            if (sprite.enabled) {
+                this.drawSprite(i);
+            }
+        }
+    }
+    
+    drawSprite(index) {
+        // Simplified sprite drawing
+        const sprite = this.sprites[index];
+        // TODO: Implement full sprite rendering
+    }
+    
+    checkRasterIRQ() {
+        const rasterCompare = this.registers[0x12] | ((this.registers[0x11] & 0x80) << 1);
+        if (this.rasterY === rasterCompare && (this.registers[0x1A] & 0x01)) {
+            // Set raster interrupt flag
+            this.registers[0x19] |= 0x01;
+            // TODO: Trigger CPU IRQ
+        }
+    }
+    
+    read(address) {
+        const reg = address & 0x3F;
+        
+        if (reg === 0x11) {
+            // Include current raster line bit 8
+            return (this.registers[reg] & 0x7F) | ((this.rasterY & 0x100) >> 1);
+        } else if (reg === 0x12) {
+            // Current raster line bits 0-7
+            return this.rasterY & 0xFF;
+        }
+        
+        return this.registers[reg];
+    }
+    
+    write(address, value) {
+        const reg = address & 0x3F;
+        this.registers[reg] = value;
+        
+        // Handle special registers
+        if (reg === 0x11) {
+            // Control register 1
+            this.textMode = !(value & 0x20);
+            this.bitmapMode = !!(value & 0x20);
+            this.extendedColorMode = !!(value & 0x40);
+        } else if (reg === 0x16) {
+            // Control register 2
+            this.multicolorMode = !!(value & 0x10);
+        } else if (reg === 0x18) {
+            // Memory pointers
+            this.screenMemory = ((value >> 4) & 0x0F) * 0x400;
+            this.charGenMemory = ((value >> 1) & 0x07) * 0x800;
+        }
+    }
+    // Add to VIC2.js - Fixed character display for PETSCII codes
+
+    drawCharacter(x, y, screenCode, color) {
+        if (!this.charROM || this.charROM.length < 4096) {
+            // No character ROM - draw placeholder
+            for (let py = 0; py < 8; py++) {
+                for (let px = 0; px < 8; px++) {
+                    if ((px + py) % 2 === 0) {
+                        this.frameBuffer[(y + py) * 384 + (x + px)] = color;
+                    }
+                }
+            }
+            return;
+        }
+        
+        // Convert screen code to character ROM offset
+        // C64 screen codes are different from ASCII!
+        let charIndex = screenCode;
+        
+        // Check which character set is active (bit 1 of $D018)
+        const charsetBank = (this.registers[0x18] & 0x0E) >> 1;
+        
+        // For Open ROMs, characters might be in different positions
+        // Screen codes 0-31: @ABC... letters
+        // Screen codes 32-63: space !"#... symbols  
+        // Screen codes 64-95: shifted letters
+        // Screen codes 96-127: shifted symbols
+        
+        // Get character data from ROM (8 bytes per character)
+        const charOffset = charIndex * 8;
+        
+        for (let row = 0; row < 8; row++) {
+            let charByte = 0;
+            
+            if (charOffset + row < this.charROM.length) {
+                charByte = this.charROM[charOffset + row];
+            }
+            
+            // Draw the 8 pixels of this row
+            for (let col = 0; col < 8; col++) {
+                if (charByte & (0x80 >> col)) {
+                    // Pixel is on
+                    this.frameBuffer[(y + row) * 384 + (x + col)] = color;
+                }
+            }
+        }
+    }
+
+    // Also update renderTextMode to initialize screen properly
+    // renderTextMode() {
+    //     // Get screen memory location (usually $0400)
+    //     const screenMemory = ((this.registers[0x18] & 0xF0) >> 4) * 0x400;
+        
+    //     // Colors
+    //     const borderColor = this.c64Colors[this.registers[0x20] & 0x0F];
+    //     const bgColor = this.c64Colors[this.registers[0x21] & 0x0F];
+    //     const defaultTextColor = this.c64Colors[14]; // Light blue
+        
+    //     // Clear with border color
+    //     for (let i = 0; i < this.frameBuffer.length; i++) {
+    //         this.frameBuffer[i] = borderColor;
+    //     }
+        
+    //     // Draw main screen area background
+    //     const startX = this.borderWidth;
+    //     const startY = this.borderHeight;
+    //     const endX = startX + this.screenWidth;
+    //     const endY = startY + this.screenHeight;
+        
+    //     for (let y = startY; y < endY; y++) {
+    //         for (let x = startX; x < endX; x++) {
+    //             this.frameBuffer[y * 384 + x] = bgColor;
+    //         }
+    //     }
+        
+    //     // Render text characters (40x25)
+    //     for (let row = 0; row < 25; row++) {
+    //         for (let col = 0; col < 40; col++) {
+    //             const charIndex = row * 40 + col;
+    //             const screenAddr = screenMemory + charIndex;
+    //             const screenCode = this.memory.read(screenAddr);
+                
+    //             // Get color from color RAM ($D800-$DBFF)
+    //             let colorCode = this.memory.read(0xD800 + charIndex) & 0x0F;
+                
+    //             // If color RAM not initialized, use default
+    //             if (colorCode === 0) {
+    //                 colorCode = 14; // Light blue
+    //             }
+                
+    //             // Only draw non-space characters
+    //             if (screenCode !== 0x20 && screenCode !== 0x00) {
+    //                 this.drawCharacter(
+    //                     col * 8 + startX,
+    //                     row * 8 + startY,
+    //                     screenCode,
+    //                     this.c64Colors[colorCode]
+    //                 );
+    //             }
+    //         }
+    //     }
+    // }
+
+        
+    renderTextMode() {
+        const screenMemory = ((this.registers[0x18] & 0xF0) >> 4) * 0x400;
+        const borderColor = this.palette[this.registers[0x20] & 0x0F];
+        const bgColor = this.palette[this.registers[0x21] & 0x0F];
+        
+        // Fill background
+        const data = this.imageData.data;
+        const startX = this.borderWidth;
+        const startY = this.borderHeight;
+        const endX = startX + this.screenWidth;
+        const endY = startY + this.screenHeight;
+        
+        for (let y = startY; y < endY; y++) {
+            for (let x = startX; x < endX; x++) {
+                const offset = (y * 384 + x) * 4;
+                data[offset] = (bgColor >> 16) & 0xFF;
+                data[offset + 1] = (bgColor >> 8) & 0xFF;
+                data[offset + 2] = bgColor & 0xFF;
+                data[offset + 3] = 255;
+            }
+        }
+        
+        // Render text characters (40x25)
+        for (let row = 0; row < 25; row++) {
+            for (let col = 0; col < 40; col++) {
+                const charIndex = row * 40 + col;
+                const screenCode = this.memory.read(screenMemory + charIndex);
+                
+                // Skip empty characters
+                if (screenCode === 0x20 || screenCode === 0x00) continue;
+                
+                // Get color from color RAM
+                const colorCode = this.memory.read(0xD800 + charIndex) & 0x0F;
+                const color = this.palette[colorCode || 14]; // Default light blue
+                
+                // Get character data from charset
+                const charLine = screenCode * 8;
+                
+                for (let cy = 0; cy < 8; cy++) {
+                    const charData = this.memory.charset ? 
+                        this.memory.charset[charLine + cy] : 0xFF;
+                    
+                    for (let cx = 0; cx < 8; cx++) {
+                        if (charData & (0x80 >> cx)) {
+                            const px = col * 8 + cx + startX;
+                            const py = row * 8 + cy + startY;
+                            const offset = (py * 384 + px) * 4;
+                            
+                            data[offset] = (color >> 16) & 0xFF;
+                            data[offset + 1] = (color >> 8) & 0xFF;
+                            data[offset + 2] = color & 0xFF;
+                            data[offset + 3] = 255;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    getCanvas() {
+        return this.canvas;
+    }
+}

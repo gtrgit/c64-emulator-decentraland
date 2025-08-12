@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C64 Emulator - MIT Licensed</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #A8A8FF;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        h1 {
+            text-shadow: 0 0 10px #40318D;
+            margin-bottom: 20px;
+        }
+        
+        #emulator-container {
+            border: 4px solid #8B7355;
+            background: #40318D;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 30px rgba(139, 115, 85, 0.8);
+        }
+        
+        canvas {
+            width: 768px;
+            height: 544px;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            display: block;
+            background: #000;
+        }
+        
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        button {
+            background: #40318D;
+            color: #A8A8FF;
+            border: 2px solid #A8A8FF;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            background: #A8A8FF;
+            color: #40318D;
+            transform: scale(1.05);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            background: rgba(0, 255, 0, 0.1);
+            border: 1px solid #0f0;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #0f0;
+            min-width: 600px;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+        }
+        
+        .license-info {
+            margin-top: 20px;
+            padding: 10px;
+            background: rgba(255, 255, 0, 0.1);
+            border: 1px solid #ff0;
+            border-radius: 4px;
+            color: #ff0;
+            font-size: 11px;
+            max-width: 600px;
+        }
+        
+        #error-display {
+            color: #f00;
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid #f00;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .loading {
+            color: #ff0;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <h1>🕹️ C64 Emulator - Clean MIT License</h1>
+    
+    <div id="emulator-container">
+        <canvas id="screen" width="384" height="272"></canvas>
+    </div>
+    
+    <div class="controls">
+        <button id="startBtn" onclick="startEmulator()">Start Emulator</button>
+        <button id="resetBtn" onclick="resetEmulator()" disabled>Reset</button>
+        <button id="pauseBtn" onclick="togglePause()" disabled>Pause</button>
+        <button id="streamBtn" onclick="toggleStreaming()" disabled>Enable Streaming</button>
+        <button id="loadBtn" onclick="loadTestProgram()" disabled>Load Test PRG</button>
+    </div>
+    
+    <div class="status">
+        <div class="status-grid">
+            <div>Status: <span id="status">Not Started</span></div>
+            <div>FPS: <span id="fps">0</span></div>
+            <div>Frame: <span id="frame">0</span></div>
+            <div>PC: $<span id="pc">0000</span></div>
+        </div>
+    </div>
+    
+    <div id="error-display"></div>
+    
+    <div class="license-info">
+        <strong>License Information:</strong><br>
+        • Emulator: MIT Licensed (based on c64js)<br>
+        • ROMs: MEGA65 Open ROMs (GPL3, commercial use allowed)<br>
+        • No Commodore copyrighted material included<br>
+        • WebSocket streaming ready for Decentraland integration
+    </div>
+
+    <script type="module">
+        // Import the emulator
+        import { C64Emulator } from './src/emulator/C64Emulator.js';
+        import { StreamingAdapter } from './src/streaming/StreamingAdapter.js';
+        import { GamepadInput } from './src/input/GamepadInput.js';
+        
+        let emulator = null;
+        let streaming = null;
+        let gamepad = null;
+        let updateTimer = null;
+        
+        window.startEmulator = async function() {
+            const startBtn = document.getElementById('startBtn');
+            const status = document.getElementById('status');
+            const errorDisplay = document.getElementById('error-display');
+            
+            try {
+                startBtn.disabled = true;
+                status.textContent = 'Loading...';
+                status.className = 'loading';
+                errorDisplay.style.display = 'none';
+                
+                // Create emulator instance
+                emulator = new C64Emulator({
+                    palMode: true,
+                    streaming: false,
+                    gamepad: true
+                });
+                
+                // Initialize with canvas
+                const canvas = document.getElementById('screen');
+                await emulator.init(canvas);
+                
+                // Set up streaming adapter (but don't connect yet)
+                streaming = new StreamingAdapter(emulator);
+                
+                // Set up gamepad support
+                if (emulator.config.gamepad) {
+                    gamepad = new GamepadInput(emulator);
+                }
+                
+                // Start emulation
+                emulator.run();
+                
+                // Enable control buttons
+                document.getElementById('resetBtn').disabled = false;
+                document.getElementById('pauseBtn').disabled = false;
+                document.getElementById('streamBtn').disabled = false;
+                document.getElementById('loadBtn').disabled = false;
+                
+                // Start status updates
+                startStatusUpdates();
+                
+                status.textContent = 'Running';
+                status.className = '';
+                
+                console.log('C64 Emulator started successfully');
+                
+            } catch (error) {
+                console.error('Failed to start emulator:', error);
+                status.textContent = 'Error';
+                status.className = '';
+                errorDisplay.textContent = `Error: ${error.message}`;
+                errorDisplay.style.display = 'block';
+                startBtn.disabled = false;
+            }
+        };
+        
+        window.resetEmulator = function() {
+            if (emulator) {
+                emulator.reset();
+                console.log('Emulator reset');
+            }
+        };
+        
+        window.togglePause = function() {
+            if (!emulator) return;
+            
+            const pauseBtn = document.getElementById('pauseBtn');
+            if (emulator.running) {
+                emulator.stop();
+                pauseBtn.textContent = 'Resume';
+                document.getElementById('status').textContent = 'Paused';
+            } else {
+                emulator.run();
+                pauseBtn.textContent = 'Pause';
+                document.getElementById('status').textContent = 'Running';
+            }
+        };
+        
+        window.toggleStreaming = function() {
+            if (!streaming) return;
+            
+            const streamBtn = document.getElementById('streamBtn');
+            if (emulator.config.streaming) {
+                streaming.disconnect();
+                emulator.config.streaming = false;
+                streamBtn.textContent = 'Enable Streaming';
+                console.log('Streaming disabled');
+            } else {
+                streaming.connect();
+                emulator.config.streaming = true;
+                streamBtn.textContent = 'Disable Streaming';
+                console.log('Streaming enabled');
+            }
+        };
+        
+        window.loadTestProgram = function() {
+            if (!emulator) return;
+            
+            // Simple BASIC program as PRG
+            const basicProgram = new Uint8Array([
+                0x01, 0x08,  // Load address $0801
+                0x0C, 0x08,  // Next line pointer
+                0x0A, 0x00,  // Line number 10
+                0x9E,        // SYS token
+                0x20,        // Space
+                0x32, 0x30, 0x36, 0x34,  // "2064"
+                0x00,        // End of line
+                0x00, 0x00   // End of program
+            ]);
+            
+            emulator.loadPRG(basicProgram);
+            emulator.typeText('RUN\r');
+            console.log('Test program loaded');
+        };
+        
+        function startStatusUpdates() {
+            updateTimer = setInterval(() => {
+                if (!emulator) return;
+                
+                const stats = emulator.getStats();
+                document.getElementById('fps').textContent = stats.fps;
+                document.getElementById('frame').textContent = stats.frameCount;
+                document.getElementById('pc').textContent = stats.cpuPC;
+            }, 100);
+        }
+        
+        // Keyboard input handler
+        document.addEventListener('keydown', (e) => {
+            if (!emulator || !emulator.running) return;
+            
+            // Map keyboard to C64 keys
+            // This would need full implementation in CIA.js
+            console.log('Key pressed:', e.key);
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (updateTimer) clearInterval(updateTimer);
+            if (emulator) emulator.stop();
+            if (streaming) streaming.disconnect();
+        });
+    </script>
+</body>
+</html>

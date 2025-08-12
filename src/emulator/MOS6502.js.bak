@@ -6,7 +6,7 @@ export class MOS6502 {
         this.memory = memory;
         
         // Registers
-        self.A = 0;      // Accumulator
+        this.A = 0;      // Accumulator
         this.X = 0;      // X register
         this.Y = 0;      // Y register
         this.SP = 0xFD;  // Stack pointer
@@ -36,7 +36,7 @@ export class MOS6502 {
     //     // Read reset vector from $FFFC-$FFFD
     //     this.PC = this.memory.read16(0xFFFC);
     //     this.SP = 0xFD;
-    //     self.A = 0;
+    //     this.A = 0;
     //     this.X = 0;
     //     this.Y = 0;
     //     this.I = true;
@@ -115,18 +115,6 @@ export class MOS6502 {
                 'Type:', typeof this.instructions[opcode]);
         }
 
-        if (!this.instructions[opcode]) {
-            console.error(`Missing opcode implementation: $${opcode.toString(16)} at PC=$${this.PC.toString(16)}`);
-            console.log('Memory dump around PC:');
-            for (let i = -2; i <= 5; i++) {
-                const addr = this.PC + i;
-                const byte = this.memory.read(addr);
-                console.log(`  $${addr.toString(16)}: $${byte.toString(16)}`);
-            }
-            throw new Error(`Unimplemented opcode: $${opcode.toString(16)}`);
-        }
-
-
         // Log first few instructions to see what's happening
         if (this.stepCount === undefined) {
             this.stepCount = 0;
@@ -139,7 +127,6 @@ export class MOS6502 {
             console.log(`Step ${this.stepCount}: PC=$${pcHex} Opcode=$${opcodeHex} A=${this.A.toString(16)} X=${this.X.toString(16)} Y=${this.Y.toString(16)} SP=${this.SP.toString(16)}`);
         }
 
-        // PC increment removed - instructions handle it
         const instruction = this.instructions[opcode];
 
 
@@ -153,7 +140,7 @@ export class MOS6502 {
             return 2;
         }
         
-        // this.PC = (this.PC + 1) & 0xFFFF;
+        this.PC = (this.PC + 1) & 0xFFFF;
         const cycles = instruction.call(this);
         this.cycles += cycles;
         return cycles;
@@ -198,11 +185,6 @@ export class MOS6502 {
         this.SP = (this.SP + 1) & 0xFF;
         return this.memory.read(0x0100 + this.SP);
     }
-
-    pop() {
-        this.SP = (this.SP + 1) & 0xFF;
-        return this.memory.read(0x0100 + this.SP);
-    }
     
     push16(value) {
         this.push((value >> 8) & 0xFF);
@@ -216,54 +198,21 @@ export class MOS6502 {
     }
     
     // Addressing modes
-    // immediate() {
-    //     const addr = this.PC;
-    //     // this.PC = (this.PC + 1) & 0xFFFF;
-    //     return addr;
-    // }
-
-    // immediate() {
-    // // PC already points to operand
-    // return this.PC - 1;  // Return address of opcode for consistency
-    // }
-
     immediate() {
-    const value = this.memory.read(this.PC + 1);
-    this.PC += 2;
-    return value;
-    }
-
-    
-    // zeroPage() {
-    //     const addr = this.memory.read(this.PC);
-    //     this.PC = (this.PC + 1) & 0xFFFF;
-    //     return addr;
-    // }
-    
-    // zeroPageX() {
-    //     const addr = (this.memory.read(this.PC) + this.X) & 0xFF;
-    //     this.PC = (this.PC + 1) & 0xFFFF;
-    //     return addr;
-    // }
-
-    // zeroPage() {
-    //     // PC already points to the address byte
-    //     const addr = this.memory.read(this.PC - 1);
-    //     return addr;
-    // }
-
-    // CRITICAL FIX 2: Fix addressing modes in MOS6502.js
-    // These are returning wrong values. Replace these methods:
-
-    zeroPage() {
-        const addr = this.memory.read(this.PC + 1);
-        this.PC += 2;
+        const addr = this.PC;
+        this.PC = (this.PC + 1) & 0xFFFF;
         return addr;
     }
-
+    
+    zeroPage() {
+        const addr = this.memory.read(this.PC);
+        this.PC = (this.PC + 1) & 0xFFFF;
+        return addr;
+    }
+    
     zeroPageX() {
-        const addr = (this.memory.read(this.PC + 1) + this.X) & 0xFF;
-        this.PC += 2;
+        const addr = (this.memory.read(this.PC) + this.X) & 0xFF;
+        this.PC = (this.PC + 1) & 0xFFFF;
         return addr;
     }
     
@@ -273,26 +222,11 @@ export class MOS6502 {
         return addr;
     }
     
-    // absolute() {
-    //     const addr = this.memory.read16(this.PC);
-    //     this.PC = (this.PC + 2) & 0xFFFF;
-    //     return addr;
-    // }
-    // absolute() {
-    // // PC already points past the opcode
-    //     const low = this.memory.read(this.PC - 1);
-    //     const high = this.memory.read(this.PC);
-    //     this.PC++;  // Move past the high byte
-    //     return low | (high << 8);
-    // }
-
     absolute() {
-        const low = this.memory.read(this.PC + 1);
-        const high = this.memory.read(this.PC + 2);
-        this.PC += 3;
-        return low | (high << 8);
+        const addr = this.memory.read16(this.PC);
+        this.PC = (this.PC + 2) & 0xFFFF;
+        return addr;
     }
-
     
     absoluteX() {
         const addr = (this.memory.read16(this.PC) + this.X) & 0xFFFF;
@@ -339,267 +273,198 @@ export class MOS6502 {
     
     // Build instruction table
     buildInstructionTable() {
-        const self = this;  // ADD THIS LINE!
         this.instructions = new Array(256);
         
         // NOP
         this.instructions[0xEA] = function() { return 2; };
         
         // LDA - Load Accumulator
-        // this.instructions[0xA9] = function() { // Immediate
-        //     self.A = self.memory.read(self.immediate());
-        //     self.setNZ(self.A);
-        //     return 2;
-        // };
-        // LDA immediate (0xA9) - Fix to use current PC
-
-        // this.instructions[0xA9] = function() { // LDA immediate  
-        //     self.A = self.memory.read(self.PC + 1);  // PC already points to operand
-        //     self.Z = self.A === 0;
-        //     self.N = (self.A & 0x80) !== 0;
-        //     self.PC += 2;  // Only increment by 1 more
-        //     return 2;
-        // };
-
-        // Two-byte instructions - increment by 2
-        this.instructions[0xA9] = function() { // LDA immediate 
-            self.A = self.memory.read(self.PC + 1);  // Read from PC+1
-            self.setNZ(self.A);
-            self.PC += 2;  // Increment by 2
+        this.instructions[0xA9] = function() { // Immediate
+            this.A = this.memory.read(this.immediate());
+            this.setNZ(this.A);
             return 2;
         };
-
         this.instructions[0xA5] = function() { // Zero Page
-            self.A = self.memory.read(self.zeroPage());
-            self.setNZ(self.A);
+            this.A = this.memory.read(this.zeroPage());
+            this.setNZ(this.A);
             return 3;
         };
         this.instructions[0xAD] = function() { // Absolute
-            self.A = self.memory.read(self.absolute());
-            self.setNZ(self.A);
+            this.A = this.memory.read(this.absolute());
+            this.setNZ(this.A);
             return 4;
         };
         
         // LDX - Load X
         // this.instructions[0xA2] = function() { // Immediate
-        //     self.X = self.memory.read(self.immediate());
-        //     self.setNZ(self.X);
+        //     this.X = this.memory.read(this.immediate());
+        //     this.setNZ(this.X);
         //     return 2;
         // };
 
         // And LDX immediate (0xA2):
-        // this.instructions[0xA2] = function() { // LDX immediate
-        //     self.X = self.memory.read(self.PC + 1);
-        //     self.Z = self.X === 0;
-        //     self.N = (self.X & 0x80) !== 0;
-        //     self.PC += 2;  // Increment by 2 for immediate mode
-        //     return 2;
-        // };
-                
         this.instructions[0xA2] = function() { // LDX immediate
-            self.X = self.memory.read(self.PC + 1);  // Read from PC+1
-            self.setNZ(self.X);
-            self.PC += 2;  // Increment by 2
+            self.X = self.memory.read(self.PC + 1);
+            self.Z = self.X === 0;
+            self.N = (self.X & 0x80) !== 0;
+            self.PC += 2;  // Increment by 2 for immediate mode
             return 2;
         };
-
+        
 
         this.instructions[0xA6] = function() { // Zero Page
-            self.X = self.memory.read(self.zeroPage());
-            self.setNZ(self.X);
+            this.X = this.memory.read(this.zeroPage());
+            this.setNZ(this.X);
             return 3;
         };
         
         // LDY - Load Y
         this.instructions[0xA0] = function() { // Immediate
-            self.Y = self.memory.read(self.immediate());
-            self.setNZ(self.Y);
+            this.Y = this.memory.read(this.immediate());
+            this.setNZ(this.Y);
             return 2;
         };
         
         // STA - Store Accumulator
         this.instructions[0x85] = function() { // Zero Page
-            self.memory.write(self.memory.read(self.PC + 1), self.A); self.PC += 2;
+            this.memory.write(this.zeroPage(), this.A);
             return 3;
         };
-        // this.instructions[0x8D] = function() { // Absolute
-        //     self.memory.write(self.absolute(), self.A);
-        //     self.PC += 3;
-        //     return 4;
-        // };
-        // STA Absolute
         this.instructions[0x8D] = function() { // Absolute
-            const low = self.memory.read(self.PC + 1);
-            const high = self.memory.read(self.PC + 2);
-            const addr = low | (high << 8);
-            self.memory.write(addr, self.A);
-            self.PC += 3;  // ADD THIS
+            this.memory.write(this.absolute(), this.A);
             return 4;
         };
-
-
         this.instructions[0x95] = function() { // Zero Page,X
-            self.memory.write(self.zeroPageX(), self.A);
+            this.memory.write(this.zeroPageX(), this.A);
             return 4;
         };
         this.instructions[0x9D] = function() { // Absolute,X
-            self.memory.write(self.absoluteX(), self.A);
+            this.memory.write(this.absoluteX(), this.A);
             return 5;
         };
         
         // STX - Store X
-        // this.instructions[0x86] = function() { // Zero Page
-        //     self.memory.write(self.zeroPage(), self.X);
-        //     self.PC += 2;
-        //     return 3;
-        // };
-        
-        // // STY - Store Y
-        // this.instructions[0x84] = function() { // Zero Page
-        //     self.memory.write(self.zeroPage(), self.Y);
-        //     self.PC += 2;
-        //     return 3;
-        // };
-
-        // STX - Store X
         this.instructions[0x86] = function() { // Zero Page
-            const addr = self.memory.read(self.PC + 1);
-            self.memory.write(addr, self.X);
-            self.PC += 2;  // ADD THIS
+            this.memory.write(this.zeroPage(), this.X);
             return 3;
         };
-
+        
         // STY - Store Y
         this.instructions[0x84] = function() { // Zero Page
-            const addr = self.memory.read(self.PC + 1);
-            self.memory.write(addr, self.Y);
-            self.PC += 2;  // ADD THIS
+            this.memory.write(this.zeroPage(), this.Y);
             return 3;
         };
-
         
         // Transfer instructions
         this.instructions[0xAA] = function() { // TAX
-            self.X = self.A;
-            self.setNZ(self.X);
-            self.PC++;
+            this.X = this.A;
+            this.setNZ(this.X);
             return 2;
         };
         this.instructions[0xA8] = function() { // TAY
-            self.Y = self.A;
-            self.setNZ(self.Y);
-            self.PC++;
+            this.Y = this.A;
+            this.setNZ(this.Y);
             return 2;
         };
         this.instructions[0x8A] = function() { // TXA
-            self.A = self.X;
-            self.setNZ(self.A);
-            self.PC++;
+            this.A = this.X;
+            this.setNZ(this.A);
             return 2;
         };
         this.instructions[0x98] = function() { // TYA
-            self.A = self.Y;
-            self.setNZ(self.A);
-            self.PC++;
+            this.A = this.Y;
+            this.setNZ(this.A);
             return 2;
         };
-        
+        // this.instructions[0x9A] = function() { // TXS
+        //     this.SP = this.X;
+        //     return 2;
+        // };
         // TXS - Transfer X to Stack Pointer (0x9A)
         this.instructions[0x9A] = function() {
             self.SP = self.X;
             self.PC++;
-            // self.PC++;
             return 2;
         };
 
-     
+        // this.instructions[0xBA] = function() { // TSX
+        //     this.X = this.SP;
+        //     this.setNZ(this.X);
+        //     return 2;
+        // };
+
         // TSX - Transfer Stack Pointer to X (0xBA)
         this.instructions[0xBA] = function() {
             self.X = self.SP;
             self.Z = self.X === 0;
             self.N = (self.X & 0x80) !== 0;
             self.PC++;
-            // self.PC++;
             return 2;
         };
 
         // INC/DEC
         this.instructions[0xE8] = function() { // INX
-            self.X = (self.X + 1) & 0xFF;
-            self.setNZ(self.X);
-            self.PC++;
+            this.X = (this.X + 1) & 0xFF;
+            this.setNZ(this.X);
             return 2;
         };
         this.instructions[0xC8] = function() { // INY
-            self.Y = (self.Y + 1) & 0xFF;
-            self.setNZ(self.Y);
-            self.PC++;
+            this.Y = (this.Y + 1) & 0xFF;
+            this.setNZ(this.Y);
             return 2;
         };
         this.instructions[0xCA] = function() { // DEX
-            self.X = (self.X - 1) & 0xFF;
-            self.setNZ(self.X);
-            self.PC++;
+            this.X = (this.X - 1) & 0xFF;
+            this.setNZ(this.X);
             return 2;
         };
         this.instructions[0x88] = function() { // DEY
-            self.Y = (self.Y - 1) & 0xFF;
-            self.setNZ(self.Y);
-            self.PC++;
+            this.Y = (this.Y - 1) & 0xFF;
+            this.setNZ(this.Y);
             return 2;
         };
         
         // Branches
         this.instructions[0xD0] = function() { // BNE
-            const offset = self.relative();
-            if (!self.Z) {
-                self.PC = (self.PC + offset) & 0xFFFF;
+            const offset = this.relative();
+            if (!this.Z) {
+                this.PC = (this.PC + offset) & 0xFFFF;
                 return 3;
             }
             return 2;
         };
         this.instructions[0xF0] = function() { // BEQ
-            const offset = self.relative();
-            if (self.Z) {
-                self.PC = (self.PC + offset) & 0xFFFF;
+            const offset = this.relative();
+            if (this.Z) {
+                this.PC = (this.PC + offset) & 0xFFFF;
                 return 3;
             }
             return 2;
         };
         this.instructions[0x10] = function() { // BPL
-            const offset = self.relative();
-            if (!self.N) {
-                self.PC = (self.PC + offset) & 0xFFFF;
+            const offset = this.relative();
+            if (!this.N) {
+                this.PC = (this.PC + offset) & 0xFFFF;
                 return 3;
             }
             return 2;
         };
         this.instructions[0x30] = function() { // BMI
-            const offset = self.relative();
-            if (self.N) {
-                self.PC = (self.PC + offset) & 0xFFFF;
+            const offset = this.relative();
+            if (this.N) {
+                this.PC = (this.PC + offset) & 0xFFFF;
                 return 3;
             }
             return 2;
         };
         
         // Jumps
-        // this.instructions[0x4C] = function() { // JMP Absolute
-        //     self.PC = self.absolute();
-        //     return 3;
-        // };
-        // Three-byte instructions - increment by 3
-        this.instructions[0x4C] = function() { // JMP absolute
-            const low = self.memory.read(self.PC + 1);
-            const high = self.memory.read(self.PC + 2);
-            self.PC = low | (high << 8);  // Jump to address
-            // No increment needed - we're jumping!
+        this.instructions[0x4C] = function() { // JMP Absolute
+            this.PC = this.absolute();
             return 3;
         };
-
-
         // this.instructions[0x6C] = function() { // JMP Indirect
-        //     self.PC = self.indirect();
+        //     this.PC = this.indirect();
         //     return 5;
         // };
         // JMP indirect - CRITICAL for C64
@@ -618,38 +483,20 @@ export class MOS6502 {
             return 5;
         };
 
-        // this.instructions[0x20] = function() { // JSR
-        //     const addr = self.absolute();
-        //     self.push16(self.PC - 1);
-        //     self.PC = addr;
-        //     return 6;
-        // };
-
-        // NEW FIXED VERSION - Add this to MOS6502.js in buildInstructionTable():
         this.instructions[0x20] = function() { // JSR
-            // Read address BEFORE modifying PC
-            const low = self.memory.read(self.PC + 1);
-            const high = self.memory.read(self.PC + 2);
-            const addr = low | (high << 8);
-            
-            // Push return address (PC + 2, pointing to last byte of JSR)
-            self.push16((self.PC + 2) & 0xFFFF);
-            
-            // Jump to subroutine
-            self.PC = addr;
-            console.log(`JSR to $${addr.toString(16)}`);
+            const addr = this.absolute();
+            this.push16(this.PC - 1);
+            this.PC = addr;
             return 6;
         };
-
-
         this.instructions[0x60] = function() { // RTS
-            self.PC = (self.pull16() + 1) & 0xFFFF;
+            this.PC = (this.pull16() + 1) & 0xFFFF;
             return 6;
         };
         
         // Stack
         // this.instructions[0x48] = function() { // PHA
-        //     self.push(self.A);
+        //     this.push(this.A);
         //     return 3;
         // };
 
@@ -660,8 +507,8 @@ export class MOS6502 {
             return 3;
         };
         // this.instructions[0x68] = function() { // PLA
-        //     self.A = self.pull();
-        //     self.setNZ(self.A);
+        //     this.A = this.pull();
+        //     this.setNZ(this.A);
         //     return 4;
         // };
         // PLA - Pull Accumulator (0x68)
@@ -669,626 +516,357 @@ export class MOS6502 {
             self.A = self.pop();
             self.Z = self.A === 0;
             self.N = (self.A & 0x80) !== 0;
-            // self.PC++;
+            self.PC++;
             return 4;
         };
 
 
-       
+        // Flags
+        // this.instructions[0x78] = function() { // SEI
+        //     this.I = true;
+        //     return 2;
+        // };
         // This should be in your instructions array:
         this.instructions[0x78] = function() { // SEI - Set Interrupt Disable
             self.I = true;
-            self.PC++;
+            self.PC++;  // Just increment PC by 1
             return 2;
         };
 
 
         this.instructions[0x58] = function() { // CLI
-            self.I = false;
-            self.PC++;
+            this.I = false;
             return 2;
         };
 
-            
-        this.instructions[0xEA] = function() { // NOP
-            self.PC++;  // ADD THIS
-            return 2;
-        };
-
+        // this.instructions[0xD8] = function() { // CLD
+        //     this.D = false;
+        //     return 2;
+        // };
 
         this.instructions[0xD8] = function() { // CLD - Clear Decimal Mode
             self.D = false;
-            self.PC++;
+            self.PC++;  // Just increment PC by 1
             return 2;
         };
 
         this.instructions[0x38] = function() { // SEC
-            self.C = true;
-            self.PC++;
+            this.C = true;
             return 2;
         };
         this.instructions[0x18] = function() { // CLC
-            self.C = false;
-            self.PC++;
+            this.C = false;
             return 2;
         };
         
         // Compare
         this.instructions[0xC9] = function() { // CMP Immediate
-            const value = self.memory.read(self.immediate());
-            const result = self.A - value;
-            self.C = self.A >= value;
-            self.setNZ(result & 0xFF);
+            const value = this.memory.read(this.immediate());
+            const result = this.A - value;
+            this.C = this.A >= value;
+            this.setNZ(result & 0xFF);
             return 2;
         };
         this.instructions[0xE0] = function() { // CPX Immediate
-            const value = self.memory.read(self.immediate());
-            const result = self.X - value;
-            self.C = self.X >= value;
-            self.setNZ(result & 0xFF);
+            const value = this.memory.read(this.immediate());
+            const result = this.X - value;
+            this.C = this.X >= value;
+            this.setNZ(result & 0xFF);
             return 2;
         };
         
         // Interrupts
         this.instructions[0x40] = function() { // RTI
-            this.setP(self.pull());
-            self.PC = self.pull16();
+            this.setP(this.pull());
+            this.PC = this.pull16();
             return 6;
         };
 
-
-
-
         // Add these to your buildInstructionTable() method in MOS6502.js
 // Place them BEFORE the "Fill remaining with illegal opcodes" loop
-// Add these missing opcodes to your buildInstructionTable() in MOS6502.js
-// Add them BEFORE the "Fill remaining with illegal opcodes" loop at the end
-
-// LDA absolute,X ($BD) - CRITICAL - Add around line 380
-this.instructions[0xBD] = function() { // LDA absolute,X
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.X) & 0xFFFF;
-    self.A = self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4; // Extra cycle if page crossed
-};
-
-// LDX absolute ($AE) - Add this too
-this.instructions[0xAE] = function() { // LDX absolute
-    const addr = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    self.X = self.memory.read(addr);
-    self.Z = self.X === 0;
-    self.N = (self.X & 0x80) !== 0;
-    self.PC += 3;
-    return 4;
-};
-
-// LDX absolute,Y ($BE)
-this.instructions[0xBE] = function() { // LDX absolute,Y
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.Y) & 0xFFFF;
-    self.X = self.memory.read(addr);
-    self.Z = self.X === 0;
-    self.N = (self.X & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4;
-};
-
-// LDX zero page,Y ($B6)
-this.instructions[0xB6] = function() { // LDX zero page,Y
-    const addr = (self.memory.read(self.PC + 1) + self.Y) & 0xFF;
-    self.X = self.memory.read(addr);
-    self.Z = self.X === 0;
-    self.N = (self.X & 0x80) !== 0;
-    self.PC += 2;
-    return 4;
-};
-
-// LDY absolute ($AC)
-this.instructions[0xAC] = function() { // LDY absolute
-    const addr = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    self.Y = self.memory.read(addr);
-    self.Z = self.Y === 0;
-    self.N = (self.Y & 0x80) !== 0;
-    self.PC += 3;
-    return 4;
-};
-
-// LDY absolute,X ($BC)
-this.instructions[0xBC] = function() { // LDY absolute,X
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.X) & 0xFFFF;
-    self.Y = self.memory.read(addr);
-    self.Z = self.Y === 0;
-    self.N = (self.Y & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4;
-};
-
-// LDY zero page ($A4)
-this.instructions[0xA4] = function() { // LDY zero page
-    const addr = self.memory.read(self.PC + 1);
-    self.Y = self.memory.read(addr);
-    self.Z = self.Y === 0;
-    self.N = (self.Y & 0x80) !== 0;
-    self.PC += 2;
-    return 3;
-};
-
-// LDY zero page,X ($B4)
-this.instructions[0xB4] = function() { // LDY zero page,X
-    const addr = (self.memory.read(self.PC + 1) + self.X) & 0xFF;
-    self.Y = self.memory.read(addr);
-    self.Z = self.Y === 0;
-    self.N = (self.Y & 0x80) !== 0;
-    self.PC += 2;
-    return 4;
-};
-
-// STX absolute ($8E)
-this.instructions[0x8E] = function() { // STX absolute
-    const addr = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    self.memory.write(addr, self.X);
-    self.PC += 3;
-    return 4;
-};
-
-// STX zero page,Y ($96)
-this.instructions[0x96] = function() { // STX zero page,Y
-    const addr = (self.memory.read(self.PC + 1) + self.Y) & 0xFF;
-    self.memory.write(addr, self.X);
-    self.PC += 2;
-    return 4;
-};
-
-// STY absolute ($8C)
-this.instructions[0x8C] = function() { // STY absolute
-    const addr = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    self.memory.write(addr, self.Y);
-    self.PC += 3;
-    return 4;
-};
-
-// STY zero page,X ($94)
-this.instructions[0x94] = function() { // STY zero page,X
-    const addr = (self.memory.read(self.PC + 1) + self.X) & 0xFF;
-    self.memory.write(addr, self.Y);
-    self.PC += 2;
-    return 4;
-};
-
-// AND absolute ($2D)
-this.instructions[0x2D] = function() { // AND absolute
-    const addr = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    self.A = self.A & self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 3;
-    return 4;
-};
-
-// AND absolute,X ($3D)
-this.instructions[0x3D] = function() { // AND absolute,X
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.X) & 0xFFFF;
-    self.A = self.A & self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4;
-};
-
-// AND absolute,Y ($39)
-this.instructions[0x39] = function() { // AND absolute,Y
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.Y) & 0xFFFF;
-    self.A = self.A & self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4;
-};
-
-// AND (indirect,X) ($21)
-this.instructions[0x21] = function() { // AND (indirect,X)
-    const base = self.memory.read(self.PC + 1);
-    const ptr = (base + self.X) & 0xFF;
-    const addr = self.memory.read(ptr) | (self.memory.read((ptr + 1) & 0xFF) << 8);
-    self.A = self.A & self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 2;
-    return 6;
-};
-
-// AND (indirect),Y ($31)
-this.instructions[0x31] = function() { // AND (indirect),Y
-    const ptr = self.memory.read(self.PC + 1);
-    const base = self.memory.read(ptr) | (self.memory.read((ptr + 1) & 0xFF) << 8);
-    const addr = (base + self.Y) & 0xFFFF;
-    self.A = self.A & self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 2;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 6 : 5;
-};
-
-// ORA absolute,X ($1D)
-this.instructions[0x1D] = function() { // ORA absolute,X
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.X) & 0xFFFF;
-    self.A = self.A | self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4;
-};
-
-// ORA absolute,Y ($19)
-this.instructions[0x19] = function() { // ORA absolute,Y
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.Y) & 0xFFFF;
-    self.A = self.A | self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4;
-};
-
-// ORA (indirect,X) ($01)
-this.instructions[0x01] = function() { // ORA (indirect,X)
-    const base = self.memory.read(self.PC + 1);
-    const ptr = (base + self.X) & 0xFF;
-    const addr = self.memory.read(ptr) | (self.memory.read((ptr + 1) & 0xFF) << 8);
-    self.A = self.A | self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 2;
-    return 6;
-};
-
-// ORA (indirect),Y ($11)
-this.instructions[0x11] = function() { // ORA (indirect),Y
-    const ptr = self.memory.read(self.PC + 1);
-    const base = self.memory.read(ptr) | (self.memory.read((ptr + 1) & 0xFF) << 8);
-    const addr = (base + self.Y) & 0xFFFF;
-    self.A = self.A | self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 2;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 6 : 5;
-};
-
-// EOR absolute,X ($5D)
-this.instructions[0x5D] = function() { // EOR absolute,X
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.X) & 0xFFFF;
-    self.A = self.A ^ self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4;
-};
-
-// EOR absolute,Y ($59)
-this.instructions[0x59] = function() { // EOR absolute,Y
-    const base = self.memory.read(self.PC + 1) | (self.memory.read(self.PC + 2) << 8);
-    const addr = (base + self.Y) & 0xFFFF;
-    self.A = self.A ^ self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 3;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 5 : 4;
-};
-
-// EOR (indirect,X) ($41)
-this.instructions[0x41] = function() { // EOR (indirect,X)
-    const base = self.memory.read(self.PC + 1);
-    const ptr = (base + self.X) & 0xFF;
-    const addr = self.memory.read(ptr) | (self.memory.read((ptr + 1) & 0xFF) << 8);
-    self.A = self.A ^ self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 2;
-    return 6;
-};
-
-// EOR (indirect),Y ($51)
-this.instructions[0x51] = function() { // EOR (indirect),Y
-    const ptr = self.memory.read(self.PC + 1);
-    const base = self.memory.read(ptr) | (self.memory.read((ptr + 1) & 0xFF) << 8);
-    const addr = (base + self.Y) & 0xFFFF;
-    self.A = self.A ^ self.memory.read(addr);
-    self.Z = self.A === 0;
-    self.N = (self.A & 0x80) !== 0;
-    self.PC += 2;
-    return ((base & 0xFF00) !== (addr & 0xFF00)) ? 6 : 5;
-};
 
 // ROL - Rotate Left
 this.instructions[0x2A] = function() { // ROL A
-    const carry = self.C ? 1 : 0;
-    self.C = (self.A & 0x80) !== 0;
-    self.A = ((self.A << 1) | carry) & 0xFF;
-    self.setNZ(self.A);
+    const carry = this.C ? 1 : 0;
+    this.C = (this.A & 0x80) !== 0;
+    this.A = ((this.A << 1) | carry) & 0xFF;
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0x26] = function() { // ROL Zero Page
-    const addr = self.zeroPage();
-    let value = self.memory.read(addr);
-    const carry = self.C ? 1 : 0;
-    self.C = (value & 0x80) !== 0;
+    const addr = this.zeroPage();
+    let value = this.memory.read(addr);
+    const carry = this.C ? 1 : 0;
+    this.C = (value & 0x80) !== 0;
     value = ((value << 1) | carry) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 5;
 };
 
 this.instructions[0x36] = function() { // ROL Zero Page,X
-    const addr = self.zeroPageX();
-    let value = self.memory.read(addr);
-    const carry = self.C ? 1 : 0;
-    self.C = (value & 0x80) !== 0;
+    const addr = this.zeroPageX();
+    let value = this.memory.read(addr);
+    const carry = this.C ? 1 : 0;
+    this.C = (value & 0x80) !== 0;
     value = ((value << 1) | carry) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0x2E] = function() { // ROL Absolute
-    const addr = self.absolute();
-    let value = self.memory.read(addr);
-    const carry = self.C ? 1 : 0;
-    self.C = (value & 0x80) !== 0;
+    const addr = this.absolute();
+    let value = this.memory.read(addr);
+    const carry = this.C ? 1 : 0;
+    this.C = (value & 0x80) !== 0;
     value = ((value << 1) | carry) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0x3E] = function() { // ROL Absolute,X
-    const addr = self.absoluteX();
-    let value = self.memory.read(addr);
-    const carry = self.C ? 1 : 0;
-    self.C = (value & 0x80) !== 0;
+    const addr = this.absoluteX();
+    let value = this.memory.read(addr);
+    const carry = this.C ? 1 : 0;
+    this.C = (value & 0x80) !== 0;
     value = ((value << 1) | carry) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 7;
 };
 
 // ROR - Rotate Right
 this.instructions[0x6A] = function() { // ROR A
-    const carry = self.C ? 0x80 : 0;
-    self.C = (self.A & 0x01) !== 0;
-    self.A = (self.A >> 1) | carry;
-    self.setNZ(self.A);
+    const carry = this.C ? 0x80 : 0;
+    this.C = (this.A & 0x01) !== 0;
+    this.A = (this.A >> 1) | carry;
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0x66] = function() { // ROR Zero Page
-    const addr = self.zeroPage();
-    let value = self.memory.read(addr);
-    const carry = self.C ? 0x80 : 0;
-    self.C = (value & 0x01) !== 0;
+    const addr = this.zeroPage();
+    let value = this.memory.read(addr);
+    const carry = this.C ? 0x80 : 0;
+    this.C = (value & 0x01) !== 0;
     value = (value >> 1) | carry;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 5;
 };
 
 this.instructions[0x76] = function() { // ROR Zero Page,X
-    const addr = self.zeroPageX();
-    let value = self.memory.read(addr);
-    const carry = self.C ? 0x80 : 0;
-    self.C = (value & 0x01) !== 0;
+    const addr = this.zeroPageX();
+    let value = this.memory.read(addr);
+    const carry = this.C ? 0x80 : 0;
+    this.C = (value & 0x01) !== 0;
     value = (value >> 1) | carry;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0x6E] = function() { // ROR Absolute
-    const addr = self.absolute();
-    let value = self.memory.read(addr);
-    const carry = self.C ? 0x80 : 0;
-    self.C = (value & 0x01) !== 0;
+    const addr = this.absolute();
+    let value = this.memory.read(addr);
+    const carry = this.C ? 0x80 : 0;
+    this.C = (value & 0x01) !== 0;
     value = (value >> 1) | carry;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0x7E] = function() { // ROR Absolute,X
-    const addr = self.absoluteX();
-    let value = self.memory.read(addr);
-    const carry = self.C ? 0x80 : 0;
-    self.C = (value & 0x01) !== 0;
+    const addr = this.absoluteX();
+    let value = this.memory.read(addr);
+    const carry = this.C ? 0x80 : 0;
+    this.C = (value & 0x01) !== 0;
     value = (value >> 1) | carry;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 7;
 };
 
 // ASL - Arithmetic Shift Left
 this.instructions[0x0A] = function() { // ASL A
-    self.C = (self.A & 0x80) !== 0;
-    self.A = (self.A << 1) & 0xFF;
-    self.setNZ(self.A);
+    this.C = (this.A & 0x80) !== 0;
+    this.A = (this.A << 1) & 0xFF;
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0x06] = function() { // ASL Zero Page
-    const addr = self.zeroPage();
-    let value = self.memory.read(addr);
-    self.C = (value & 0x80) !== 0;
+    const addr = this.zeroPage();
+    let value = this.memory.read(addr);
+    this.C = (value & 0x80) !== 0;
     value = (value << 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 5;
 };
 
 this.instructions[0x16] = function() { // ASL Zero Page,X
-    const addr = self.zeroPageX();
-    let value = self.memory.read(addr);
-    self.C = (value & 0x80) !== 0;
+    const addr = this.zeroPageX();
+    let value = this.memory.read(addr);
+    this.C = (value & 0x80) !== 0;
     value = (value << 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0x0E] = function() { // ASL Absolute
-    const addr = self.absolute();
-    let value = self.memory.read(addr);
-    self.C = (value & 0x80) !== 0;
+    const addr = this.absolute();
+    let value = this.memory.read(addr);
+    this.C = (value & 0x80) !== 0;
     value = (value << 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0x1E] = function() { // ASL Absolute,X
-    const addr = self.absoluteX();
-    let value = self.memory.read(addr);
-    self.C = (value & 0x80) !== 0;
+    const addr = this.absoluteX();
+    let value = this.memory.read(addr);
+    this.C = (value & 0x80) !== 0;
     value = (value << 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 7;
 };
 
 // LSR - Logical Shift Right
 this.instructions[0x4A] = function() { // LSR A
-    self.C = (self.A & 0x01) !== 0;
-    self.A = self.A >> 1;
-    self.setNZ(self.A);
+    this.C = (this.A & 0x01) !== 0;
+    this.A = this.A >> 1;
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0x46] = function() { // LSR Zero Page
-    const addr = self.zeroPage();
-    let value = self.memory.read(addr);
-    self.C = (value & 0x01) !== 0;
+    const addr = this.zeroPage();
+    let value = this.memory.read(addr);
+    this.C = (value & 0x01) !== 0;
     value = value >> 1;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 5;
 };
 
 this.instructions[0x56] = function() { // LSR Zero Page,X
-    const addr = self.zeroPageX();
-    let value = self.memory.read(addr);
-    self.C = (value & 0x01) !== 0;
+    const addr = this.zeroPageX();
+    let value = this.memory.read(addr);
+    this.C = (value & 0x01) !== 0;
     value = value >> 1;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0x4E] = function() { // LSR Absolute
-    const addr = self.absolute();
-    let value = self.memory.read(addr);
-    self.C = (value & 0x01) !== 0;
+    const addr = this.absolute();
+    let value = this.memory.read(addr);
+    this.C = (value & 0x01) !== 0;
     value = value >> 1;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0x5E] = function() { // LSR Absolute,X
-    const addr = self.absoluteX();
-    let value = self.memory.read(addr);
-    self.C = (value & 0x01) !== 0;
+    const addr = this.absoluteX();
+    let value = this.memory.read(addr);
+    this.C = (value & 0x01) !== 0;
     value = value >> 1;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 7;
 };
 
 // BIT - Bit Test
 this.instructions[0x24] = function() { // BIT Zero Page
-    const value = self.memory.read(self.zeroPage());
-    self.Z = (self.A & value) === 0;
-    self.N = (value & 0x80) !== 0;
-    self.V = (value & 0x40) !== 0;
+    const value = this.memory.read(this.zeroPage());
+    this.Z = (this.A & value) === 0;
+    this.N = (value & 0x80) !== 0;
+    this.V = (value & 0x40) !== 0;
     return 3;
 };
 
 this.instructions[0x2C] = function() { // BIT Absolute
-    const value = self.memory.read(self.absolute());
-    self.Z = (self.A & value) === 0;
-    self.N = (value & 0x80) !== 0;
-    self.V = (value & 0x40) !== 0;
+    const value = this.memory.read(this.absolute());
+    this.Z = (this.A & value) === 0;
+    this.N = (value & 0x80) !== 0;
+    this.V = (value & 0x40) !== 0;
     return 4;
 };
 
 // INC - Increment Memory
 this.instructions[0xE6] = function() { // INC Zero Page
-    const addr = self.zeroPage();
-    let value = (self.memory.read(addr) + 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    const addr = this.zeroPage();
+    let value = (this.memory.read(addr) + 1) & 0xFF;
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 5;
 };
 
 this.instructions[0xF6] = function() { // INC Zero Page,X
-    const addr = self.zeroPageX();
-    let value = (self.memory.read(addr) + 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    const addr = this.zeroPageX();
+    let value = (this.memory.read(addr) + 1) & 0xFF;
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0xEE] = function() { // INC Absolute
-    const addr = self.absolute();
-    let value = (self.memory.read(addr) + 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    const addr = this.absolute();
+    let value = (this.memory.read(addr) + 1) & 0xFF;
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0xFE] = function() { // INC Absolute,X
-    const addr = self.absoluteX();
-    let value = (self.memory.read(addr) + 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    const addr = this.absoluteX();
+    let value = (this.memory.read(addr) + 1) & 0xFF;
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 7;
 };
 
 // DEC - Decrement Memory
 this.instructions[0xC6] = function() { // DEC Zero Page
-    const addr = self.zeroPage();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    const addr = this.zeroPage();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 5;
 };
 
 this.instructions[0xD6] = function() { // DEC Zero Page,X
-    const addr = self.zeroPageX();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    const addr = this.zeroPageX();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0xCE] = function() { // DEC Absolute
-    const addr = self.absolute();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    const addr = this.absolute();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0xDE] = function() { // DEC Absolute,X
-    const addr = self.absoluteX();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    self.setNZ(value);
+    const addr = this.absoluteX();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    this.setNZ(value);
     return 7;
 };
 
@@ -1305,23 +883,23 @@ this.instructions[0xDE] = function() { // DEC Absolute,X
 
 // NOP zp (2-byte NOPs that read zero page)
 this.instructions[0x04] = function() { // NOP zp
-    self.zeroPage(); // Read and discard
+    this.zeroPage(); // Read and discard
     return 3;
 };
 
 this.instructions[0x44] = function() { // NOP zp
-    self.zeroPage(); // Read and discard
+    this.zeroPage(); // Read and discard
     return 3;
 };
 
 this.instructions[0x64] = function() { // NOP zp
-    self.zeroPage(); // Read and discard
+    this.zeroPage(); // Read and discard
     return 3;
 };
 
 // NOP absolute (3-byte NOP)
 this.instructions[0x0C] = function() { // NOP abs
-    self.absolute(); // Read and discard
+    this.absolute(); // Read and discard
     return 4;
 };
 
@@ -1352,230 +930,230 @@ this.instructions[0xFA] = function() { // NOP
 
 // NOP immediate (2-byte NOPs)
 this.instructions[0x80] = function() { // NOP #
-    self.immediate(); // Read and discard
+    this.immediate(); // Read and discard
     return 2;
 };
 
 this.instructions[0x82] = function() { // NOP #
-    self.immediate(); // Read and discard
+    this.immediate(); // Read and discard
     return 2;
 };
 
 this.instructions[0x89] = function() { // NOP #
-    self.immediate(); // Read and discard
+    this.immediate(); // Read and discard
     return 2;
 };
 
 this.instructions[0xC2] = function() { // NOP #
-    self.immediate(); // Read and discard
+    this.immediate(); // Read and discard
     return 2;
 };
 
 this.instructions[0xE2] = function() { // NOP #
-    self.immediate(); // Read and discard
+    this.immediate(); // Read and discard
     return 2;
 };
 
 // NOP zp,X variants
 this.instructions[0x14] = function() { // NOP zp,X
-    self.zeroPageX(); // Read and discard
+    this.zeroPageX(); // Read and discard
     return 4;
 };
 
 this.instructions[0x34] = function() { // NOP zp,X
-    self.zeroPageX(); // Read and discard
+    this.zeroPageX(); // Read and discard
     return 4;
 };
 
 this.instructions[0x54] = function() { // NOP zp,X
-    self.zeroPageX(); // Read and discard
+    this.zeroPageX(); // Read and discard
     return 4;
 };
 
 this.instructions[0x74] = function() { // NOP zp,X
-    self.zeroPageX(); // Read and discard
+    this.zeroPageX(); // Read and discard
     return 4;
 };
 
 this.instructions[0xD4] = function() { // NOP zp,X
-    self.zeroPageX(); // Read and discard
+    this.zeroPageX(); // Read and discard
     return 4;
 };
 
 this.instructions[0xF4] = function() { // NOP zp,X
-    self.zeroPageX(); // Read and discard
+    this.zeroPageX(); // Read and discard
     return 4;
 };
 
 // NOP abs,X variants
 this.instructions[0x1C] = function() { // NOP abs,X
-    self.absoluteX(); // Read and discard
+    this.absoluteX(); // Read and discard
     return 4;
 };
 
 this.instructions[0x3C] = function() { // NOP abs,X
-    self.absoluteX(); // Read and discard
+    this.absoluteX(); // Read and discard
     return 4;
 };
 
 this.instructions[0x5C] = function() { // NOP abs,X
-    self.absoluteX(); // Read and discard
+    this.absoluteX(); // Read and discard
     return 4;
 };
 
 this.instructions[0x7C] = function() { // NOP abs,X
-    self.absoluteX(); // Read and discard
+    this.absoluteX(); // Read and discard
     return 4;
 };
 
 this.instructions[0xDC] = function() { // NOP abs,X
-    self.absoluteX(); // Read and discard
+    this.absoluteX(); // Read and discard
     return 4;
 };
 
 this.instructions[0xFC] = function() { // NOP abs,X
-    self.absoluteX(); // Read and discard
+    this.absoluteX(); // Read and discard
     return 4;
 };
 
 // LAX - Load A and X with same value (unofficial but commonly used)
 this.instructions[0xA7] = function() { // LAX zp
-    const value = self.memory.read(self.zeroPage());
-    self.A = value;
-    self.X = value;
-    self.setNZ(value);
+    const value = this.memory.read(this.zeroPage());
+    this.A = value;
+    this.X = value;
+    this.setNZ(value);
     return 3;
 };
 
 this.instructions[0xB7] = function() { // LAX zp,Y
-    const value = self.memory.read(self.zeroPageY());
-    self.A = value;
-    self.X = value;
-    self.setNZ(value);
+    const value = this.memory.read(this.zeroPageY());
+    this.A = value;
+    this.X = value;
+    this.setNZ(value);
     return 4;
 };
 
 this.instructions[0xAF] = function() { // LAX abs
-    const value = self.memory.read(self.absolute());
-    self.A = value;
-    self.X = value;
-    self.setNZ(value);
+    const value = this.memory.read(this.absolute());
+    this.A = value;
+    this.X = value;
+    this.setNZ(value);
     return 4;
 };
 
 this.instructions[0xBF] = function() { // LAX abs,Y
-    const value = self.memory.read(self.absoluteY());
-    self.A = value;
-    self.X = value;
-    self.setNZ(value);
+    const value = this.memory.read(this.absoluteY());
+    this.A = value;
+    this.X = value;
+    this.setNZ(value);
     return 4;
 };
 
 this.instructions[0xA3] = function() { // LAX (zp,X)
-    const value = self.memory.read(self.indirectX());
-    self.A = value;
-    self.X = value;
-    self.setNZ(value);
+    const value = this.memory.read(this.indirectX());
+    this.A = value;
+    this.X = value;
+    this.setNZ(value);
     return 6;
 };
 
 this.instructions[0xB3] = function() { // LAX (zp),Y
-    const value = self.memory.read(self.indirectY());
-    self.A = value;
-    self.X = value;
-    self.setNZ(value);
+    const value = this.memory.read(this.indirectY());
+    this.A = value;
+    this.X = value;
+    this.setNZ(value);
     return 5;
 };
 
 // SAX - Store A AND X (unofficial)
 this.instructions[0x87] = function() { // SAX zp
-    self.memory.write(self.zeroPage(), self.A & self.X);
+    this.memory.write(this.zeroPage(), this.A & this.X);
     return 3;
 };
 
 this.instructions[0x97] = function() { // SAX zp,Y
-    self.memory.write(self.zeroPageY(), self.A & self.X);
+    this.memory.write(this.zeroPageY(), this.A & this.X);
     return 4;
 };
 
 this.instructions[0x8F] = function() { // SAX abs
-    self.memory.write(self.absolute(), self.A & self.X);
+    this.memory.write(this.absolute(), this.A & this.X);
     return 4;
 };
 
 this.instructions[0x83] = function() { // SAX (zp,X)
-    self.memory.write(self.indirectX(), self.A & self.X);
+    this.memory.write(this.indirectX(), this.A & this.X);
     return 6;
 };
 
 // DCP - Decrement then Compare (unofficial)
 this.instructions[0xC7] = function() { // DCP zp
-    const addr = self.zeroPage();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    const result = self.A - value;
-    self.C = self.A >= value;
-    self.setNZ(result & 0xFF);
+    const addr = this.zeroPage();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    const result = this.A - value;
+    this.C = this.A >= value;
+    this.setNZ(result & 0xFF);
     return 5;
 };
 
 this.instructions[0xD7] = function() { // DCP zp,X
-    const addr = self.zeroPageX();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    const result = self.A - value;
-    self.C = self.A >= value;
-    self.setNZ(result & 0xFF);
+    const addr = this.zeroPageX();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    const result = this.A - value;
+    this.C = this.A >= value;
+    this.setNZ(result & 0xFF);
     return 6;
 };
 
 this.instructions[0xCF] = function() { // DCP abs
-    const addr = self.absolute();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    const result = self.A - value;
-    self.C = self.A >= value;
-    self.setNZ(result & 0xFF);
+    const addr = this.absolute();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    const result = this.A - value;
+    this.C = this.A >= value;
+    this.setNZ(result & 0xFF);
     return 6;
 };
 
 this.instructions[0xDF] = function() { // DCP abs,X
-    const addr = self.absoluteX();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    const result = self.A - value;
-    self.C = self.A >= value;
-    self.setNZ(result & 0xFF);
+    const addr = this.absoluteX();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    const result = this.A - value;
+    this.C = this.A >= value;
+    this.setNZ(result & 0xFF);
     return 7;
 };
 
 this.instructions[0xDB] = function() { // DCP abs,Y
-    const addr = self.absoluteY();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    const result = self.A - value;
-    self.C = self.A >= value;
-    self.setNZ(result & 0xFF);
+    const addr = this.absoluteY();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    const result = this.A - value;
+    this.C = this.A >= value;
+    this.setNZ(result & 0xFF);
     return 7;
 };
 
 this.instructions[0xC3] = function() { // DCP (zp,X)
-    const addr = self.indirectX();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    const result = self.A - value;
-    self.C = self.A >= value;
-    self.setNZ(result & 0xFF);
+    const addr = this.indirectX();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    const result = this.A - value;
+    this.C = this.A >= value;
+    this.setNZ(result & 0xFF);
     return 8;
 };
 
 this.instructions[0xD3] = function() { // DCP (zp),Y
-    const addr = self.indirectY();
-    let value = (self.memory.read(addr) - 1) & 0xFF;
-    self.memory.write(addr, value);
-    const result = self.A - value;
-    self.C = self.A >= value;
-    self.setNZ(result & 0xFF);
+    const addr = this.indirectY();
+    let value = (this.memory.read(addr) - 1) & 0xFF;
+    this.memory.write(addr, value);
+    const result = this.A - value;
+    this.C = this.A >= value;
+    this.setNZ(result & 0xFF);
     return 8;
 };
 
@@ -1586,46 +1164,46 @@ this.instructions[0xD3] = function() { // DCP (zp),Y
 
 // BRK - Software Interrupt (opcode $00)
 this.instructions[0x00] = function() { // BRK
-    self.PC++; // BRK is a 2-byte instruction (opcode + padding byte)
-    self.push16(self.PC);
-    self.push(self.getP() | 0x10); // Set B flag in pushed status
-    self.I = true; // Set interrupt disable
-    self.PC = self.memory.read16(0xFFFE); // Jump to IRQ vector
+    this.PC++; // BRK is a 2-byte instruction (opcode + padding byte)
+    this.push16(this.PC);
+    this.push(this.getP() | 0x10); // Set B flag in pushed status
+    this.I = true; // Set interrupt disable
+    this.PC = this.memory.read16(0xFFFE); // Jump to IRQ vector
     return 7;
 };
 
 // Missing Branch Instructions
 this.instructions[0x90] = function() { // BCC - Branch if Carry Clear
-    const offset = self.relative();
-    if (!self.C) {
-        self.PC = (self.PC + offset) & 0xFFFF;
+    const offset = this.relative();
+    if (!this.C) {
+        this.PC = (this.PC + offset) & 0xFFFF;
         return 3;
     }
     return 2;
 };
 
 this.instructions[0xB0] = function() { // BCS - Branch if Carry Set
-    const offset = self.relative();
-    if (self.C) {
-        self.PC = (self.PC + offset) & 0xFFFF;
+    const offset = this.relative();
+    if (this.C) {
+        this.PC = (this.PC + offset) & 0xFFFF;
         return 3;
     }
     return 2;
 };
 
 this.instructions[0x50] = function() { // BVC - Branch if Overflow Clear
-    const offset = self.relative();
-    if (!self.V) {
-        self.PC = (self.PC + offset) & 0xFFFF;
+    const offset = this.relative();
+    if (!this.V) {
+        this.PC = (this.PC + offset) & 0xFFFF;
         return 3;
     }
     return 2;
 };
 
 this.instructions[0x70] = function() { // BVS - Branch if Overflow Set
-    const offset = self.relative();
-    if (self.V) {
-        self.PC = (self.PC + offset) & 0xFFFF;
+    const offset = this.relative();
+    if (this.V) {
+        this.PC = (this.PC + offset) & 0xFFFF;
         return 3;
     }
     return 2;
@@ -1633,178 +1211,178 @@ this.instructions[0x70] = function() { // BVS - Branch if Overflow Set
 
 // ADC - Add with Carry (critical for BASIC)
 this.instructions[0x69] = function() { // ADC Immediate
-    const value = self.memory.read(self.immediate());
-    const result = self.A + value + (self.C ? 1 : 0);
-    self.V = ((self.A ^ result) & (value ^ result) & 0x80) !== 0;
-    self.C = result > 255;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.immediate());
+    const result = this.A + value + (this.C ? 1 : 0);
+    this.V = ((this.A ^ result) & (value ^ result) & 0x80) !== 0;
+    this.C = result > 255;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0x65] = function() { // ADC Zero Page
-    const value = self.memory.read(self.zeroPage());
-    const result = self.A + value + (self.C ? 1 : 0);
-    self.V = ((self.A ^ result) & (value ^ result) & 0x80) !== 0;
-    self.C = result > 255;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.zeroPage());
+    const result = this.A + value + (this.C ? 1 : 0);
+    this.V = ((this.A ^ result) & (value ^ result) & 0x80) !== 0;
+    this.C = result > 255;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 3;
 };
 
 this.instructions[0x75] = function() { // ADC Zero Page,X
-    const value = self.memory.read(self.zeroPageX());
-    const result = self.A + value + (self.C ? 1 : 0);
-    self.V = ((self.A ^ result) & (value ^ result) & 0x80) !== 0;
-    self.C = result > 255;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.zeroPageX());
+    const result = this.A + value + (this.C ? 1 : 0);
+    this.V = ((this.A ^ result) & (value ^ result) & 0x80) !== 0;
+    this.C = result > 255;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 4;
 };
 
 this.instructions[0x6D] = function() { // ADC Absolute
-    const value = self.memory.read(self.absolute());
-    const result = self.A + value + (self.C ? 1 : 0);
-    self.V = ((self.A ^ result) & (value ^ result) & 0x80) !== 0;
-    self.C = result > 255;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.absolute());
+    const result = this.A + value + (this.C ? 1 : 0);
+    this.V = ((this.A ^ result) & (value ^ result) & 0x80) !== 0;
+    this.C = result > 255;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 4;
 };
 
 this.instructions[0x7D] = function() { // ADC Absolute,X
-    const value = self.memory.read(self.absoluteX());
-    const result = self.A + value + (self.C ? 1 : 0);
-    self.V = ((self.A ^ result) & (value ^ result) & 0x80) !== 0;
-    self.C = result > 255;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.absoluteX());
+    const result = this.A + value + (this.C ? 1 : 0);
+    this.V = ((this.A ^ result) & (value ^ result) & 0x80) !== 0;
+    this.C = result > 255;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 4;
 };
 
 this.instructions[0x79] = function() { // ADC Absolute,Y
-    const value = self.memory.read(self.absoluteY());
-    const result = self.A + value + (self.C ? 1 : 0);
-    self.V = ((self.A ^ result) & (value ^ result) & 0x80) !== 0;
-    self.C = result > 255;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.absoluteY());
+    const result = this.A + value + (this.C ? 1 : 0);
+    this.V = ((this.A ^ result) & (value ^ result) & 0x80) !== 0;
+    this.C = result > 255;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 4;
 };
 
 this.instructions[0x61] = function() { // ADC (Indirect,X)
-    const value = self.memory.read(self.indirectX());
-    const result = self.A + value + (self.C ? 1 : 0);
-    self.V = ((self.A ^ result) & (value ^ result) & 0x80) !== 0;
-    self.C = result > 255;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.indirectX());
+    const result = this.A + value + (this.C ? 1 : 0);
+    this.V = ((this.A ^ result) & (value ^ result) & 0x80) !== 0;
+    this.C = result > 255;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 6;
 };
 
 this.instructions[0x71] = function() { // ADC (Indirect),Y
-    const value = self.memory.read(self.indirectY());
-    const result = self.A + value + (self.C ? 1 : 0);
-    self.V = ((self.A ^ result) & (value ^ result) & 0x80) !== 0;
-    self.C = result > 255;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.indirectY());
+    const result = this.A + value + (this.C ? 1 : 0);
+    this.V = ((this.A ^ result) & (value ^ result) & 0x80) !== 0;
+    this.C = result > 255;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 5;
 };
 
 // SBC - Subtract with Carry
 this.instructions[0xE9] = function() { // SBC Immediate
-    const value = self.memory.read(self.immediate());
-    const result = self.A - value - (self.C ? 0 : 1);
-    self.V = ((self.A ^ result) & (self.A ^ value) & 0x80) !== 0;
-    self.C = result >= 0;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.immediate());
+    const result = this.A - value - (this.C ? 0 : 1);
+    this.V = ((this.A ^ result) & (this.A ^ value) & 0x80) !== 0;
+    this.C = result >= 0;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0xE5] = function() { // SBC Zero Page
-    const value = self.memory.read(self.zeroPage());
-    const result = self.A - value - (self.C ? 0 : 1);
-    self.V = ((self.A ^ result) & (self.A ^ value) & 0x80) !== 0;
-    self.C = result >= 0;
-    self.A = result & 0xFF;
-    self.setNZ(self.A);
+    const value = this.memory.read(this.zeroPage());
+    const result = this.A - value - (this.C ? 0 : 1);
+    this.V = ((this.A ^ result) & (this.A ^ value) & 0x80) !== 0;
+    this.C = result >= 0;
+    this.A = result & 0xFF;
+    this.setNZ(this.A);
     return 3;
 };
 
 // AND - Logical AND
 this.instructions[0x29] = function() { // AND Immediate
-    self.A = self.A & self.memory.read(self.immediate());
-    self.setNZ(self.A);
+    this.A = this.A & this.memory.read(this.immediate());
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0x25] = function() { // AND Zero Page
-    self.A = self.A & self.memory.read(self.zeroPage());
-    self.setNZ(self.A);
+    this.A = this.A & this.memory.read(this.zeroPage());
+    this.setNZ(this.A);
     return 3;
 };
 
 this.instructions[0x35] = function() { // AND Zero Page,X
-    self.A = self.A & self.memory.read(self.zeroPageX());
-    self.setNZ(self.A);
+    this.A = this.A & this.memory.read(this.zeroPageX());
+    this.setNZ(this.A);
     return 4;
 };
 
 this.instructions[0x2D] = function() { // AND Absolute
-    self.A = self.A & self.memory.read(self.absolute());
-    self.setNZ(self.A);
+    this.A = this.A & this.memory.read(this.absolute());
+    this.setNZ(this.A);
     return 4;
 };
 
 // ORA - Logical OR
 this.instructions[0x09] = function() { // ORA Immediate
-    self.A = self.A | self.memory.read(self.immediate());
-    self.setNZ(self.A);
+    this.A = this.A | this.memory.read(this.immediate());
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0x05] = function() { // ORA Zero Page
-    self.A = self.A | self.memory.read(self.zeroPage());
-    self.setNZ(self.A);
+    this.A = this.A | this.memory.read(this.zeroPage());
+    this.setNZ(this.A);
     return 3;
 };
 
 this.instructions[0x15] = function() { // ORA Zero Page,X
-    self.A = self.A | self.memory.read(self.zeroPageX());
-    self.setNZ(self.A);
+    this.A = this.A | this.memory.read(this.zeroPageX());
+    this.setNZ(this.A);
     return 4;
 };
 
 this.instructions[0x0D] = function() { // ORA Absolute
-    self.A = self.A | self.memory.read(self.absolute());
-    self.setNZ(self.A);
+    this.A = this.A | this.memory.read(this.absolute());
+    this.setNZ(this.A);
     return 4;
 };
 
 // EOR - Exclusive OR
 this.instructions[0x49] = function() { // EOR Immediate
-    self.A = self.A ^ self.memory.read(self.immediate());
-    self.setNZ(self.A);
+    this.A = this.A ^ this.memory.read(this.immediate());
+    this.setNZ(this.A);
     return 2;
 };
 
 this.instructions[0x45] = function() { // EOR Zero Page
-    self.A = self.A ^ self.memory.read(self.zeroPage());
-    self.setNZ(self.A);
+    this.A = this.A ^ this.memory.read(this.zeroPage());
+    this.setNZ(this.A);
     return 3;
 };
 
 this.instructions[0x55] = function() { // EOR Zero Page,X
-    self.A = self.A ^ self.memory.read(self.zeroPageX());
-    self.setNZ(self.A);
+    this.A = this.A ^ this.memory.read(this.zeroPageX());
+    this.setNZ(this.A);
     return 4;
 };
 
 this.instructions[0x4D] = function() { // EOR Absolute
-    self.A = self.A ^ self.memory.read(self.absolute());
-    self.setNZ(self.A);
+    this.A = this.A ^ this.memory.read(this.absolute());
+    this.setNZ(this.A);
     return 4;
 };
 
@@ -2263,7 +1841,7 @@ this.instructions[0x08] = function() {
     self.push((self.N ? 0x80 : 0) | (self.V ? 0x40 : 0) | 0x20 | 
               (self.B ? 0x10 : 0) | (self.D ? 0x08 : 0) | 
               (self.I ? 0x04 : 0) | (self.Z ? 0x02 : 0) | (self.C ? 0x01 : 0));
-    // self.PC++;
+    self.PC++;
     return 3;
 };
 
@@ -2277,7 +1855,7 @@ this.instructions[0x28] = function() {
     self.I = (flags & 0x04) !== 0;
     self.Z = (flags & 0x02) !== 0;
     self.C = (flags & 0x01) !== 0;
-    // self.PC++;
+    self.PC++;
     return 4;
 };
 
@@ -2510,7 +2088,7 @@ this.instructions[0x99] = function() { // STA absolute,Y
 // CLV - Clear Overflow Flag (0xB8)
 this.instructions[0xB8] = function() {
     self.V = false;
-    // self.PC++;
+    self.PC++;
     return 2;
 };
 
@@ -2605,7 +2183,7 @@ this.instructions[0xF1] = function() { // SBC (indirect),Y
         for (let i = 0; i < 256; i++) {
             if (!this.instructions[i]) {
                 this.instructions[i] = function() {
-                    console.log(`Illegal opcode $${i.toString(16).padStart(2, '0')} at $${self.PC.toString(16).padStart(4, '0')}`);
+                    console.log(`Illegal opcode $${i.toString(16).padStart(2, '0')} at $${this.PC.toString(16).padStart(4, '0')}`);
                     return 2;
                 };
             }

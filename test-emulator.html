@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C64 Emulator Test - Should Show READY</title>
+    <style>
+        body {
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        #screen {
+            border: 3px solid #0f0;
+            image-rendering: pixelated;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #0f0;
+        }
+        .controls {
+            margin-top: 10px;
+        }
+        button {
+            background: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 5px 10px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0f0;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+    <h1>C64 Emulator Test</h1>
+    <canvas id="screen" width="384" height="272"></canvas>
+    
+    <div class="status">
+        <div>Status: <span id="status">Not Started</span></div>
+        <div>FPS: <span id="fps">0</span></div>
+        <div>Frame: <span id="frame">0</span></div>
+        <div>PC: <span id="pc">$0000</span></div>
+    </div>
+    
+    <div class="controls">
+        <button onclick="startEmu()">Start</button>
+        <button onclick="stopEmu()">Stop</button>
+        <button onclick="testColors()">Test Colors</button>
+        <button onclick="checkVIC()">Check VIC</button>
+    </div>
+
+    <script type="module">
+        import { C64Emulator } from './src/emulator/C64Emulator.js';
+        
+        let emulator = null;
+        
+        async function startEmu() {
+            console.log('Starting emulator...');
+            document.getElementById('status').textContent = 'Starting...';
+            
+            try {
+                const canvas = document.getElementById('screen');
+                emulator = new C64Emulator({ canvas: canvas });
+                await emulator.init(canvas);
+                emulator.start();
+                
+                // Make globally accessible
+                window.emulator = emulator;
+                
+                document.getElementById('status').textContent = 'Running';
+                console.log('✅ Emulator started!');
+                console.log('You should see READY. on the blue screen');
+                
+            } catch (error) {
+                console.error('Failed to start:', error);
+                document.getElementById('status').textContent = 'Error: ' + error.message;
+            }
+        }
+        
+        function stopEmu() {
+            if (emulator) {
+                emulator.pause();
+                document.getElementById('status').textContent = 'Stopped';
+            }
+        }
+        
+        function testColors() {
+            if (!emulator) {
+                console.log('Start emulator first!');
+                return;
+            }
+            
+            // Cycle border colors
+            let color = 0;
+            const interval = setInterval(() => {
+                emulator.poke(0xD020, color % 16);
+                color++;
+                if (color > 16) clearInterval(interval);
+            }, 200);
+        }
+        
+        function checkVIC() {
+            if (!emulator) {
+                console.log('Start emulator first!');
+                return;
+            }
+            
+            console.log('VIC State:');
+            console.log('  rasterY:', emulator.vic.rasterY);
+            console.log('  cycleCounter:', emulator.vic.cycleCounter);
+            console.log('  Border color:', emulator.vic.registers[0x20]);
+            console.log('  BG color:', emulator.vic.registers[0x21]);
+            console.log('  Canvas:', emulator.vic.canvas);
+            console.log('  Context:', emulator.vic.ctx);
+            
+            // Check screen memory
+            console.log('Screen memory (first 6 chars):');
+            for (let i = 0; i < 6; i++) {
+                const code = emulator.memory.read(0x0400 + i);
+                console.log(`  [${i}]: $${code.toString(16)} (${code})`);
+            }
+        }
+        
+        // Make functions global
+        window.startEmu = startEmu;
+        window.stopEmu = stopEmu;
+        window.testColors = testColors;
+        window.checkVIC = checkVIC;
+        
+        console.log('Test page ready!');
+        console.log('Click "Start" button or run: startEmu()');
+    </script>
+</body>
+</html>

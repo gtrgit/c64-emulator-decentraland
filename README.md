@@ -9,6 +9,8 @@ MIT-licensed Commodore 64 emulator optimized for WebSocket streaming to Decentra
 - MEGA65 Open ROMs (no copyright issues)
 - Demo scene content with proper licensing
 
+## Become a [sponsor](https://github.com/sponsors/gtrgit)
+
 ## 📜 License Compliance
 This project is based on [c64js](https://github.com/mborgbrant/c64js) by Marcus Borgbrant (MIT License).
 All enhancements are MIT licensed. NO GPL CODE IS USED.

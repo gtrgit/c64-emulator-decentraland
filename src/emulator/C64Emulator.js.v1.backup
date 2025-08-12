@@ -1,0 +1,684 @@
+// C64Emulator.js - Modernized ES6 C64 Emulator
+// Based on c64js (MIT License) - Clean room implementation
+// Summary: User wants to start C64 emulator development with modernized ES6 structure
+
+import { MOS6502 } from './MOS6502.js';
+import { VIC2 } from './VIC2.js';
+import { CIA } from './CIA.js';
+import { Memory } from './Memory.js';
+import { SID } from './SID.js';
+import { ROMLoader } from './ROMLoader.js';
+
+export class C64Emulator {
+    constructor(config = {}) {
+        // Core components
+        this.memory = new Memory(65536);
+        this.cpu = new MOS6502(this.memory);
+        this.vic = new VIC2(this.memory);
+        this.cia1 = new CIA(1, this.memory);
+        this.cia2 = new CIA(2, this.memory);
+        this.sid = new SID(this.memory);
+
+        // Around line 16, after creating this.vic
+        this.vic = new VIC2(this.memory);
+        console.log('VIC2 instance created:', this.vic);
+        console.log('VIC2.cycle exists?', typeof this.vic.cycle);
+        console.log('VIC2 methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.vic)));
+        
+        // Configuration
+        this.config = {
+            streaming: false,
+            gamepad: false,
+            palMode: true,
+            ...config
+        };
+        
+        // Timing
+        this.running = false;
+        this.frameCount = 0;
+        this.cyclesPerFrame = this.config.palMode ? 19656 : 17095; // PAL vs NTSC
+        this.frameRate = this.config.palMode ? 50 : 60;
+        
+        // Canvas for display
+        this.canvas = null;
+        this.ctx = null;
+        
+        // Callbacks
+        this.onFrameComplete = null;
+        this.onReset = null;
+        
+        // Performance tracking
+        this.lastFrameTime = 0;
+        this.actualFPS = 0;
+    }
+    
+    async init(canvasElement) {
+        // Set up display
+        if (canvasElement) {
+            this.canvas = canvasElement;
+            this.ctx = this.canvas.getContext('2d');
+            this.vic.setCanvas(this.canvas);
+        }
+        
+        // Load ROMs
+        await this.loadROMs();
+        
+        // Connect components
+        this.connectComponents();
+        
+        // Initial reset
+        this.reset();
+
+        this.setupKeyboard();
+        console.log('Keyboard input initialized');
+
+        return this;
+    }
+    
+    async loadROMs() {
+        try {
+            console.log('Loading MEGA65 Open ROMs...');
+            const roms = await ROMLoader.loadMEGA65();
+            
+            // Load KERNAL ROM at $E000-$FFFF
+            for (let i = 0; i < roms.kernal.length; i++) {
+                this.memory.rom[0xE000 + i] = roms.kernal[i];
+            }
+            
+            // Load BASIC ROM at $A000-$BFFF
+            for (let i = 0; i < roms.basic.length; i++) {
+                this.memory.rom[0xA000 + i] = roms.basic[i];
+            }
+            
+            // Load Character ROM at $D000-$DFFF (VIC bank)
+            for (let i = 0; i < roms.charset.length; i++) {
+                this.memory.charset[i] = roms.charset[i];
+            }
+            
+            console.log('ROMs loaded successfully');
+        } catch (error) {
+            console.error('Failed to load ROMs:', error);
+            throw new Error('ROM loading failed - check that MEGA65 Open ROMs are available');
+        }
+    }
+    
+    connectComponents() {
+        // Memory mapping
+        // $D000-$D3FF: VIC-II
+        this.memory.setIOHandler(0xD000, 0xD3FF, 
+            (addr) => this.vic.read(addr),
+            (addr, val) => this.vic.write(addr, val)
+        );
+        
+        // $D400-$D7FF: SID
+        this.memory.setIOHandler(0xD400, 0xD7FF,
+            (addr) => this.sid.read(addr),
+            (addr, val) => this.sid.write(addr, val)
+        );
+        
+        // $DC00-$DCFF: CIA 1
+        this.memory.setIOHandler(0xDC00, 0xDCFF,
+            (addr) => this.cia1.read(addr),
+            (addr, val) => this.cia1.write(addr, val)
+        );
+        
+        // $DD00-$DDFF: CIA 2
+        this.memory.setIOHandler(0xDD00, 0xDDFF,
+            (addr) => this.cia2.read(addr),
+            (addr, val) => this.cia2.write(addr, val)
+        );
+        
+        // Connect IRQ/NMI lines
+        this.vic.onIRQ = () => this.cpu.irq();
+        this.cia1.onIRQ = () => this.cpu.irq();
+        this.cia2.onNMI = () => this.cpu.nmi();
+    }
+    
+
+    reset() {
+        console.log('Resetting C64...');
+        
+        // Clear RAM
+        for (let i = 0; i < 65536; i++) {
+            this.memory.ram[i] = 0;
+        }
+        
+        // Set up initial memory state
+        this.memory.write(0x0000, 0x2F); // Data direction register
+        this.memory.write(0x0001, 0x37); // Memory configuration
+        
+        // Initialize screen with spaces
+        for (let i = 0; i < 1000; i++) {
+            this.memory.write(0x0400 + i, 0x20); // Space character
+        }
+        
+        // Write "READY." to screen memory
+        const readyText = [0x12, 0x05, 0x01, 0x04, 0x19, 0x2E]; // READY. in screen codes
+        for (let i = 0; i < readyText.length; i++) {
+            this.memory.write(0x0400 + i, readyText[i]);
+        }
+        
+        // Set color RAM to light blue
+        for (let i = 0; i < 1000; i++) {
+            this.memory.write(0xD800 + i, 14); // Light blue
+        }
+        
+        // Reset all components
+        this.cpu.reset();
+        this.vic.reset();
+        this.cia1.reset();
+        this.cia2.reset();
+        this.sid.reset();
+        
+        // Set VIC registers for proper display
+        this.vic.registers[0x20] = 0x0E; // Border: light blue
+        this.vic.registers[0x21] = 0x06; // Background: blue
+        this.vic.registers[0x18] = 0x14; // Screen at $0400, charset at ROM
+        
+        this.frameCount = 0;
+
+            // Initialize keyboard system
+        this.memory.write(0x00C6, 0x00); // Clear keyboard buffer count
+        this.memory.write(0x00CB, 0x00); // Clear keyboard strobe
+        
+        // Set up keyboard vectors
+        this.memory.write(0x028F, 0x4A); // Keyboard decode table low
+        this.memory.write(0x0290, 0xEB); // Keyboard decode table high
+        
+        // Enable keyboard interrupts
+        this.cia1.registers[0x0D] = 0x81; // Enable timer A interrupts
+        
+        if (this.onReset) {
+            this.onReset();
+        }
+    }
+
+    run() {
+        if (this.running) return;
+        
+        this.running = true;
+        this.lastFrameTime = performance.now();
+        this.runFrame();
+    }
+    
+
+    start() {
+        console.log('Starting C64 emulation...');
+        if (this.running) return;
+        
+        this.running = true;
+        this.lastFrameTime = performance.now();
+        this.runFrame();
+    }
+
+    stop() {
+        console.log('Stopping C64 emulation...');
+        this.running = false;
+    }
+
+
+     // Add pause() as an alias for stop()
+    pause() {
+        this.stop();
+    }
+    
+   
+    runFrame() {
+        if (!this.running) return;
+        
+        const frameStart = performance.now();
+        let cycles = 0;
+
+        // Process keyboard at the start of each frame!
+        this.cia1.processKeyboard();  // <-- ADD THIS LINE
+        
+        // Run CPU and VIC in sync - THIS IS THE KEY FIX!
+        while (cycles < this.cyclesPerFrame && this.running) {
+            try {
+                // Execute one CPU instruction
+                const cpuCycles = this.cpu.step();
+                
+                // VIC runs at same speed as CPU (1MHz) - CRITICAL FIX
+                for (let i = 0; i < cpuCycles; i++) {
+                    this.vic.cycle();
+                }
+                
+                // Update other components
+                this.cia1.cycle(cpuCycles);
+                this.cia2.cycle(cpuCycles);
+                this.sid.cycle(cpuCycles);
+                
+                cycles += cpuCycles;
+            } catch (error) {
+                console.error('Emulation error:', error);
+                this.running = false;
+                break;
+            }
+        }
+        
+        this.frameCount++;
+        
+        // Update stats every second
+        if (this.frameCount % 50 === 0) {
+            const now = performance.now();
+            const fps = 1000 / (now - this.lastFrameTime);
+            this.lastFrameTime = now;
+            
+            if (document.getElementById('fps')) {
+                document.getElementById('fps').textContent = fps.toFixed(1);
+            }
+            if (document.getElementById('frame')) {
+                document.getElementById('frame').textContent = this.frameCount;
+            }
+            if (document.getElementById('pc')) {
+                document.getElementById('pc').textContent = '$' + this.cpu.PC.toString(16).padStart(4, '0');
+            }
+            
+            // Debug: Check VIC state
+            // console.log(`Frame ${this.frameCount}: rasterY=${this.vic.rasterY}, PC=$${this.cpu.PC.toString(16)}`);
+        }
+        
+        // Schedule next frame
+        if (this.running) {
+            const targetDelay = 1000 / this.frameRate; // 50fps for PAL
+            const actualTime = performance.now() - frameStart;
+            const delay = Math.max(0, targetDelay - actualTime);
+            
+            setTimeout(() => this.runFrame(), delay);
+        }
+    }
+        
+    updateStatsDisplay() {
+        if (document.getElementById('fps')) {
+            document.getElementById('fps').textContent = this.actualFPS.toFixed(1);
+        }
+        if (document.getElementById('frame')) {
+            document.getElementById('frame').textContent = this.frameCount;
+        }
+        if (document.getElementById('pc')) {
+            document.getElementById('pc').textContent = '$' + this.cpu.PC.toString(16).padStart(4, '0');
+        }
+        if (document.getElementById('status')) {
+            document.getElementById('status').textContent = this.running ? 'Running' : 'Stopped';
+        }
+    }
+
+
+    // Add to C64Emulator.js
+    forceKeyboardProcess() {
+        // Directly inject into keyboard buffer for immediate processing
+        const bufferIndex = this.memory.read(0x00C6);
+        
+        if (this.cia1.pendingKeys && this.cia1.pendingKeys.length > 0) {
+            while (this.cia1.pendingKeys.length > 0 && bufferIndex < 10) {
+                const key = this.cia1.pendingKeys.shift();
+                this.memory.write(0x0277 + bufferIndex, key);
+                this.memory.write(0x00C6, bufferIndex + 1);
+                
+                // Set keyboard strobe
+                this.memory.write(0x00CB, 0x01);
+            }
+            
+            // Force BASIC to check keyboard
+            this.cpu.irq();
+        }
+    }
+
+
+    // Public API for external control
+    loadPRG(data, address = null) {
+        // PRG format: first two bytes are load address
+        const loadAddr = address || (data[0] | (data[1] << 8));
+        
+        console.log(`Loading PRG at $${loadAddr.toString(16)}`);
+        
+        // Copy program to memory
+        for (let i = 2; i < data.length; i++) {
+            this.memory.write(loadAddr + i - 2, data[i]);
+        }
+        
+        // Set BASIC pointers if loading to BASIC area
+        if (loadAddr === 0x0801) {
+            // Update BASIC program end pointer
+            const endAddr = loadAddr + data.length - 2;
+            this.memory.write(0x2D, endAddr & 0xFF);
+            this.memory.write(0x2E, endAddr >> 8);
+            this.memory.write(0x2F, endAddr & 0xFF);
+            this.memory.write(0x30, endAddr >> 8);
+        }
+    }
+    
+    typeText(text) {
+        // Simulate keyboard input
+        for (const char of text) {
+            this.cia1.typeChar(char);
+        }
+    }
+    
+    setJoystick(port, state) {
+        // Port 1 or 2
+        if (port === 1) {
+            this.cia1.setJoystick(state);
+        } else {
+            this.cia2.setJoystick(state);
+        }
+    }
+    
+    getStats() {
+        return {
+            fps: this.actualFPS.toFixed(1),
+            frameCount: this.frameCount,
+            cpuPC: this.cpu.PC.toString(16).padStart(4, '0'),
+            cpuA: this.cpu.A.toString(16).padStart(2, '0'),
+            cpuX: this.cpu.X.toString(16).padStart(2, '0'),
+            cpuY: this.cpu.Y.toString(16).padStart(2, '0'),
+            rasterLine: this.vic.rasterY
+        };
+    }
+    
+    // For debugging
+    peek(address) {
+        return this.memory.read(address);
+    }
+    
+    poke(address, value) {
+        this.memory.write(address, value);
+    }
+    
+    disassemble(address, lines = 10) {
+        return this.cpu.disassemble(address, lines);
+    }
+    setupKeyboard() {
+        // Set up keyboard event listeners
+        document.addEventListener('keydown', (e) => {
+            // Prevent default for keys we handle
+            if (this.handleKeyDown(e.key)) {
+                e.preventDefault();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            this.handleKeyUp(e.key);
+        });
+        
+        // Connect CIA to screen writer
+        this.cia1.onKeyPress = (char) => {
+            this.writeCharToScreen(char);
+        };
+    }
+
+    // handleKeyDown(key) {
+    //     // Update CIA key matrix
+    //     this.cia1.updateKeyMatrix(key, true);
+        
+    //     // Handle shift
+    //     if (key === 'Shift') {
+    //         this.cia1.shiftPressed = true;
+    //         return true;
+    //     }
+        
+    //     // Get character code
+    //     const mapping = this.cia1.keyMap[key.toLowerCase()];
+    //     if (mapping) {
+    //         const charCode = this.cia1.shiftPressed ? mapping.shifted : mapping.code;
+    //         this.writeCharToScreen(charCode);
+    //         return true;
+    //     }
+        
+    //     return false;
+    // }
+    handleKeyDown(key) {
+        // Update CIA key matrix
+        this.cia1.updateKeyMatrix(key, true);
+        
+        // Handle shift
+        if (key === 'Shift') {
+            this.cia1.shiftPressed = true;
+            return true;
+        }
+        
+        // For single character keys, use the key directly
+        if (key.length === 1) {
+            let charCode = key.charCodeAt(0);
+            
+            // Handle shift modifications
+            if (this.cia1.shiftPressed) {
+                // Convert lowercase to uppercase when shift is pressed
+                if (charCode >= 97 && charCode <= 122) { // a-z
+                    charCode -= 32; // Convert to A-Z
+                }
+                // You could add more shift combinations here
+            }
+            
+            this.writeCharToScreen(charCode);
+            return true;
+        }
+        
+        // Handle special keys
+        switch(key) {
+            case 'Enter':
+                this.writeCharToScreen(0x0D);
+                return true;
+            case 'Backspace':
+                this.writeCharToScreen(0x14);
+                return true;
+            case ' ':
+                this.writeCharToScreen(0x20);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+        handleKeyUp(key) {
+            this.cia1.updateKeyMatrix(key, false);
+            
+            if (key === 'Shift') {
+                this.cia1.shiftPressed = false;
+            }
+        }
+
+        // writeCharToScreen(charCode) {
+        //     // Get current cursor position
+        //     const cursorPos = this.vic.cursorY * 40 + this.vic.cursorX;
+            
+        //     // Handle special characters
+        //     if (charCode === 0x0D) { // Return key
+        //         // Move cursor to start of next line
+        //         this.vic.cursorX = 0;
+        //         this.vic.cursorY++;
+                
+        //         // Scroll if needed
+        //         if (this.vic.cursorY >= 25) {
+        //             this.scrollScreen();
+        //             this.vic.cursorY = 24;
+        //         }
+        //         return;
+        //     }
+            
+        //     if (charCode === 0x14) { // Delete/Backspace
+        //         if (this.vic.cursorX > 0) {
+        //             this.vic.cursorX--;
+        //             const pos = this.vic.cursorY * 40 + this.vic.cursorX;
+        //             this.memory.write(0x0400 + pos, 0x20); // Space
+        //         }
+        //         return;
+        //     }
+            
+        //     // Write character to screen memory
+        //     // Convert ASCII to screen code (simplified)
+        //     let screenCode = charCode;
+        //     if (charCode >= 0x41 && charCode <= 0x5A) { // A-Z
+        //         screenCode = charCode - 0x40; // Convert to screen codes 1-26
+        //     } else if (charCode >= 0x61 && charCode <= 0x7A) { // a-z  
+        //         screenCode = charCode - 0x60; // Convert to screen codes 1-26
+        //     } else if (charCode === 0x20) { // Space
+        //         screenCode = 0x20;
+        //     } else if (charCode >= 0x30 && charCode <= 0x39) { // 0-9
+        //         screenCode = charCode; // Numbers are same in screen codes
+        //     } else if (charCode === 0x2E) { // Period
+        //         screenCode = 0x2E;
+        //     }
+            
+        //     // Write to screen memory
+        //     this.memory.write(0x0400 + cursorPos, screenCode);
+            
+        //     // Set color for new character
+        //     this.memory.write(0xD800 + cursorPos, 14); // Light blue
+            
+        //     // Move cursor
+        //     this.vic.cursorX++;
+        //     if (this.vic.cursorX >= 40) {
+        //         this.vic.cursorX = 0;
+        //         this.vic.cursorY++;
+                
+        //         if (this.vic.cursorY >= 25) {
+        //             this.scrollScreen();
+        //             this.vic.cursorY = 24;
+        //         }
+        //     }
+            
+        //     // Force immediate render to see the character
+        //     this.vic.renderFrame();
+        // }
+        writeCharToScreen(charCode) {
+            // Get current cursor position
+            const cursorPos = this.vic.cursorY * 40 + this.vic.cursorX;
+            
+            // Handle special characters
+            if (charCode === 0x0D) { // Return key
+                // Move cursor to start of next line
+                this.vic.cursorX = 0;
+                this.vic.cursorY++;
+                
+                // Scroll if needed
+                if (this.vic.cursorY >= 25) {
+                    this.scrollScreen();
+                    this.vic.cursorY = 24;
+                }
+                return;
+            }
+            
+            if (charCode === 0x14) { // Delete/Backspace
+                if (this.vic.cursorX > 0) {
+                    this.vic.cursorX--;
+                    const pos = this.vic.cursorY * 40 + this.vic.cursorX;
+                    this.memory.write(0x0400 + pos, 0x20); // Space
+                }
+                return;
+            }
+            
+            // Convert ASCII/keyboard code to C64 screen code
+            let screenCode = this.asciiToScreenCode(charCode);
+            
+            // Write to screen memory
+            this.memory.write(0x0400 + cursorPos, screenCode);
+            
+            // Set color for new character
+            this.memory.write(0xD800 + cursorPos, 14); // Light blue
+            
+            // Move cursor
+            this.vic.cursorX++;
+            if (this.vic.cursorX >= 40) {
+                this.vic.cursorX = 0;
+                this.vic.cursorY++;
+                
+                if (this.vic.cursorY >= 25) {
+                    this.scrollScreen();
+                    this.vic.cursorY = 24;
+                }
+            }
+            
+            // Force immediate render to see the character
+            this.vic.renderFrame();
+        }
+
+
+        // Add this new method to C64Emulator class
+        asciiToScreenCode(ascii) {
+            // C64 Screen Code conversion table
+            // Based on default character set (uppercase/graphics mode)
+            
+            // Space
+            if (ascii === 0x20) return 0x20;
+            
+            // @ (at sign)
+            if (ascii === 0x40) return 0x00;
+            
+            // A-Z (uppercase letters) -> screen codes 1-26
+            if (ascii >= 0x41 && ascii <= 0x5A) {
+                return ascii - 0x40; // A=1, B=2, ... Z=26
+            }
+            
+            // a-z (lowercase letters) -> display as uppercase in default mode
+            if (ascii >= 0x61 && ascii <= 0x7A) {
+                return ascii - 0x60; // a=1, b=2, ... z=26 (same as uppercase)
+            }
+            
+            // 0-9 (numbers) -> screen codes 48-57
+            if (ascii >= 0x30 && ascii <= 0x39) {
+                return ascii; // Numbers are same: 0=48, 1=49, ... 9=57
+            }
+            
+            // Special characters with direct mappings
+            const specialChars = {
+                0x21: 0x21, // !
+                0x22: 0x22, // "
+                0x23: 0x23, // #
+                0x24: 0x24, // $
+                0x25: 0x25, // %
+                0x26: 0x26, // &
+                0x27: 0x27, // '
+                0x28: 0x28, // (
+                0x29: 0x29, // )
+                0x2A: 0x2A, // *
+                0x2B: 0x2B, // +
+                0x2C: 0x2C, // ,
+                0x2D: 0x2D, // -
+                0x2E: 0x2E, // .
+                0x2F: 0x2F, // /
+                0x3A: 0x3A, // :
+                0x3B: 0x3B, // ;
+                0x3C: 0x3C, // <
+                0x3D: 0x3D, // =
+                0x3E: 0x3E, // >
+                0x3F: 0x3F, // ?
+                0x5B: 0x1B, // [ -> screen code 27
+                0x5D: 0x1D, // ] -> screen code 29
+            };
+            
+            if (specialChars[ascii] !== undefined) {
+                return specialChars[ascii];
+            }
+            
+            // Default: return space for unmapped characters
+            console.log(`Unmapped character: ${String.fromCharCode(ascii)} (0x${ascii.toString(16)})`);
+            return 0x20; // Space as fallback
+        }
+
+
+        scrollScreen() {
+            // Scroll screen up one line
+            for (let y = 0; y < 24; y++) {
+                for (let x = 0; x < 40; x++) {
+                    const src = (y + 1) * 40 + x;
+                    const dst = y * 40 + x;
+                    // Copy character
+                    this.memory.write(0x0400 + dst, this.memory.read(0x0400 + src));
+                    // Copy color
+                    this.memory.write(0xD800 + dst, this.memory.read(0xD800 + src));
+                }
+            }
+            
+            // Clear last line
+            for (let x = 0; x < 40; x++) {
+                this.memory.write(0x0400 + 24 * 40 + x, 0x20); // Space
+                this.memory.write(0xD800 + 24 * 40 + x, 14); // Light blue
+            }
+        }
+}
+
+// Export for use in browser or Node.js
+if (typeof window !== 'undefined') {
+    window.C64Emulator = C64Emulator;
+}
