@@ -138,7 +138,67 @@ export class C64Emulator {
         this.cia1.onIRQ = () => this.cpu.irq();
         this.cia2.onNMI = () => this.cpu.nmi();
     }
-    
+
+        // Add this method to your C64Emulator class to display the startup message
+    displayStartupMessage() {
+        console.log('Displaying C64 startup message...');
+        
+        // Clear screen first (fill with spaces)
+        for (let i = 0; i < 1000; i++) {
+            this.memory.write(0x0400 + i, 0x20); // Space character
+            this.memory.write(0xD800 + i, 14);    // Light blue color
+        }
+        
+        // Line 1: **** COMMODORE 64 BASIC V2 ****
+        const line1 = [
+            0x20, 0x20, 0x20, 0x20,                               // 4 spaces padding
+            0x2A, 0x2A, 0x2A, 0x2A, 0x20,                         // ****_
+            0x03, 0x0F, 0x0D, 0x0D, 0x0F, 0x04, 0x0F, 0x12, 0x05, 0x20, // COMMODORE_
+            0x36, 0x34, 0x20,                                     // 64_
+            0x02, 0x01, 0x13, 0x09, 0x03, 0x20,                  // BASIC_
+            0x16, 0x32, 0x20,                                     // V2_
+            0x2A, 0x2A, 0x2A, 0x2A                                // ****
+        ];
+        
+        // Line 3: 64K RAM SYSTEM  38911 BASIC BYTES FREE
+        const line3 = [
+            0x36, 0x34, 0x0B, 0x20,                              // 64K_
+            0x12, 0x01, 0x0D, 0x20,                              // RAM_
+            0x13, 0x19, 0x13, 0x14, 0x05, 0x0D, 0x20, 0x20,     // SYSTEM__
+            0x33, 0x38, 0x39, 0x31, 0x31, 0x20,                 // 38911_
+            0x02, 0x01, 0x13, 0x09, 0x03, 0x20,                 // BASIC_
+            0x02, 0x19, 0x14, 0x05, 0x13, 0x20,                 // BYTES_
+            0x06, 0x12, 0x05, 0x05                               // FREE
+        ];
+        
+        // Line 5: READY.
+        const line5 = [0x12, 0x05, 0x01, 0x04, 0x19, 0x2E];     // READY.
+        
+        // Write line 1 (row 0)
+        let addr = 0x0400;
+        for (let i = 0; i < line1.length; i++) {
+            this.memory.write(addr + i, line1[i]);
+        }
+        
+        // Write line 3 (row 2) - skip one blank line
+        addr = 0x0400 + (2 * 40); // Row 2
+        for (let i = 0; i < line3.length; i++) {
+            this.memory.write(addr + i, line3[i]);
+        }
+        
+        // Write line 5 (row 4) - skip one more blank line
+        addr = 0x0400 + (4 * 40); // Row 4
+        for (let i = 0; i < line5.length; i++) {
+            this.memory.write(addr + i, line5[i]);
+        }
+        
+        // Position cursor after READY. on row 5
+        this.vic.cursorX = 0;
+        this.vic.cursorY = 5;
+    }
+
+
+    // Update your reset() method to include the startup message
     reset() {
         console.log('Resetting C64...');
         
@@ -151,22 +211,6 @@ export class C64Emulator {
         this.memory.write(0x0000, 0x2F); // Data direction register
         this.memory.write(0x0001, 0x37); // Memory configuration
         
-        // Initialize screen with spaces
-        for (let i = 0; i < 1000; i++) {
-            this.memory.write(0x0400 + i, 0x20); // Space character
-        }
-        
-        // Write "READY." to screen memory
-        const readyText = [0x12, 0x05, 0x01, 0x04, 0x19, 0x2E]; // READY. in screen codes
-        for (let i = 0; i < readyText.length; i++) {
-            this.memory.write(0x0400 + i, readyText[i]);
-        }
-        
-        // Set color RAM to light blue
-        for (let i = 0; i < 1000; i++) {
-            this.memory.write(0xD800 + i, 14); // Light blue
-        }
-        
         // Reset all components
         this.cpu.reset();
         this.vic.reset();
@@ -174,22 +218,24 @@ export class C64Emulator {
         this.cia2.reset();
         this.sid.reset();
         
-        // Reset BASIC interpreter state
-        this.basicReady = false;
-        this.currentInputLine = '';
-        if (this.basicProgram) {
-            this.basicProgram.clear();
-        }
-
-        
         // Set VIC registers for proper display
         this.vic.registers[0x20] = 0x0E; // Border: light blue
         this.vic.registers[0x21] = 0x06; // Background: blue
         this.vic.registers[0x18] = 0x14; // Screen at $0400, charset at ROM
+        this.vic.registers[0x11] = 0x1B; // Control register: screen on, 25 rows
+        this.vic.registers[0x16] = 0xC8; // Control register 2: standard settings
+        
+        // Display the startup message
+        this.displayStartupMessage();
+        
+        // Set color RAM to light blue
+        for (let i = 0; i < 1000; i++) {
+            this.memory.write(0xD800 + i, 14); // Light blue
+        }
         
         this.frameCount = 0;
-
-            // Initialize keyboard system
+        
+        // Initialize keyboard system
         this.memory.write(0x00C6, 0x00); // Clear keyboard buffer count
         this.memory.write(0x00CB, 0x00); // Clear keyboard strobe
         
@@ -204,14 +250,28 @@ export class C64Emulator {
             this.onReset();
         }
         
-        // Reinstall BASIC interpreter after reset
+        // Setup BASIC interpreter after reset
         if (this.running) {
             setTimeout(() => {
-                console.log('🔧 Reinstalling BASIC after reset...');
+                console.log('🔧 Setting up BASIC interpreter...');
                 this.setupBASICInterpreter();
-                console.log('✅ BASIC reinstalled after reset');
+                console.log('✅ BASIC ready');
             }, 500);
         }
+    }
+
+
+    // Alternative: If you want to test it immediately without modifying reset()
+    testStartupDisplay() {
+        // Set VIC colors
+        this.vic.registers[0x20] = 0x0E; // Border: light blue
+        this.vic.registers[0x21] = 0x06; // Background: blue
+        
+        // Display the message
+        this.displayStartupMessage();
+        
+        // Force a render
+        this.vic.renderFrame();
     }
 
 
@@ -224,15 +284,6 @@ export class C64Emulator {
     }
     
 
-    // start() {
-    //     console.log('Starting C64 emulation...');
-    //     if (this.running) return;
-        
-    //     this.running = true;
-    //     this.lastFrameTime = performance.now();
-    //     this.runFrame();
-    // }
-
     start() {
         console.log('Starting C64 emulation...');
         if (this.running) return;
@@ -240,12 +291,7 @@ export class C64Emulator {
         this.running = true;
         this.lastFrameTime = performance.now();
         
-        // Auto-setup BASIC interpreter after a brief delay
-        // if (!this.basicReady) {
-        //     setTimeout(() => {
-        //         this.setupBASICInterpreter();
-        //     }, 500); // Small delay to let emulator stabilize
-        // }
+       
         // Setup BASIC interpreter immediately when emulator starts
         if (!this.basicReady) {
             this.setupBASICInterpreter();
@@ -449,81 +495,6 @@ export class C64Emulator {
         });
     }
 
-    // 2. Updated handleKeyDown method (replace the entire method):
-    // handleKeyDown(key) {
-    //     // If BASIC is ready, use BASIC key handling
-    //     if (this.basicReady) {
-    //         if (key === 'Shift') {
-    //             this.shiftPressed = true;
-    //             return true;
-    //         }
-            
-    //         if (key === 'Enter') {
-    //             console.log('Enter pressed, currentInputLine:', this.currentInputLine);
-                
-    //             // Process BASIC command if we have input
-    //             let isLineNumber = false;
-    //             if (this.currentInputLine.trim().length > 0) {
-    //                 // Check if it's a line number entry
-    //                 const lineMatch = this.currentInputLine.trim().match(/^(\d+)\s+(.+)$/);
-    //                 isLineNumber = !!lineMatch || /^\d+$/.test(this.currentInputLine.trim());
-                    
-    //                 console.log('Is line number entry:', isLineNumber);
-    //                 this.processBASICCommand(this.currentInputLine);
-    //             }
-                
-    //             // For line number entries, just move to next line
-    //             // For commands, processBASICCommand handles the output
-    //             if (isLineNumber || this.currentInputLine.trim().length === 0) {
-    //                 // Just move cursor to next line
-    //                 this.vic.cursorX = 0;
-    //                 this.vic.cursorY++;
-    //                 if (this.vic.cursorY >= 25) {
-    //                     this.scrollScreen();
-    //                     this.vic.cursorY = 24;
-    //                 }
-    //                 this.vic.renderFrame();
-    //             }
-                
-    //             this.currentInputLine = '';
-    //             return true;
-    //         }
-            
-    //         if (key === 'Backspace') {
-    //             if (this.currentInputLine.length > 0) {
-    //                 this.currentInputLine = this.currentInputLine.slice(0, -1);
-    //                 this.handleBackspace();
-    //             }
-    //             return true;
-    //         }
-            
-    //         // Regular characters
-    //         if (key.length === 1) {
-    //             let char = key;
-                
-    //             // Handle shift
-    //             if (this.shiftPressed && char >= 'a' && char <= 'z') {
-    //                 char = char.toUpperCase();
-    //             }
-                
-    //             // Add to input line
-    //             this.currentInputLine += char;
-                
-    //             // Display on screen
-    //             this.writeCharToScreen(char.charCodeAt(0));
-    //             return true;
-    //         }
-            
-    //         return false;
-    //     }
-        
-    //     // Fall back to original method if BASIC not ready
-    //     if (this.originalHandleKeyDown) {
-    //         return this.originalHandleKeyDown(key);
-    //     }
-        
-    //     return false;
-    // }
 
         
     // Modified handleKeyDown that preserves existing functionality
@@ -618,21 +589,7 @@ export class C64Emulator {
             
             if (key === 'Enter') {
                 console.log('Enter pressed, currentInputLine:', this.currentInputLine);
-                            // Process the input
-                // const varName = this.inputMode.variables[this.inputMode.currentVarIndex];
-                // const value = this.inputMode.buffer.trim();
-                
-                // // Store the value - use uppercase for consistency but accept both
-                // const upperVarName = varName.toUpperCase();
-                // if (upperVarName.endsWith('$')) {
-                //     this.basicStrings.set(upperVarName, value);
-                // } else {
-                //     const numValue = parseFloat(value) || 0;
-                //     this.basicVariables.set(upperVarName, numValue);
-                // }
-                
-                // console.log(`INPUT: ${upperVarName} = "${value}"`);
-
+    
 
                 // Process BASIC command if we have input
                 let isLineNumber = false;
@@ -928,59 +885,6 @@ export class C64Emulator {
     }
 
 
-    // executeRUN() {
-    //     this.printToScreen('');
-        
-    //     // Reset all state - USE forLoopStack, not forLoops!
-    //     this.basicVariables.clear();
-    //     this.basicStrings.clear();
-    //     this.basicArrays.clear();
-    //     this.basicCallStack = [];
-    //     this.forLoopStack = [];  // ← CHANGED: Use forLoopStack instead of forLoops
-        
-    //     // Get sorted program lines
-    //     const sortedLines = Array.from(this.basicProgram.entries()).sort((a, b) => a[0] - b[0]);
-        
-    //     if (sortedLines.length === 0) {
-    //         this.printToScreen('READY.');
-    //         return;
-    //     }
-        
-    //     // Execute program
-    //     let currentIndex = 0;
-        
-    //     while (currentIndex < sortedLines.length && currentIndex >= 0) {
-    //         const [lineNum, lineContent] = sortedLines[currentIndex];
-            
-    //         console.log(`Executing line ${lineNum}: ${lineContent}`);
-    //         console.log(`  forLoopStack:`, this.forLoopStack);
-            
-    //         // Execute the line
-    //         const result = this.executeLine(lineNum, lineContent, sortedLines, currentIndex);
-            
-    //         if (result === 'END') {
-    //             break;
-    //         } else if (result && result.type === 'GOTO') {
-    //             // Find target line
-    //             const targetIndex = sortedLines.findIndex(([num]) => num >= result.target);
-    //             if (targetIndex === -1) {
-    //                 this.printToScreen(`?UNDEFINED STATEMENT ERROR IN ${lineNum}`);
-    //                 break;
-    //             }
-    //             currentIndex = targetIndex;
-    //             continue;
-    //         } else if (result && result.type === 'NEXT_CONTINUE') {
-    //             // Continue FOR loop from stored position
-    //             currentIndex = result.index;
-    //             continue;
-    //         }
-            
-    //         currentIndex++;
-    //     }
-        
-    //     this.printToScreen('');
-    //     this.printToScreen('READY.');
-    // }
     // Updated executeRUN to support INPUT pause and GOSUB return
     executeRUN() {
         this.printToScreen('');
@@ -1012,57 +916,6 @@ export class C64Emulator {
     }
 
     
-    // // Continue execution (called after INPUT completes)
-    // continueExecution() {
-    //     if (!this.executionContext || !this.executionContext.running) return;
-        
-    //     const { sortedLines } = this.executionContext;
-    //     let { currentIndex } = this.executionContext;
-        
-    //     while (currentIndex < sortedLines.length && currentIndex >= 0) {
-    //         const [lineNum, lineContent] = sortedLines[currentIndex];
-            
-    //         console.log(`Executing line ${lineNum}: ${lineContent}`);
-            
-    //         // Execute the line
-    //         const result = this.executeLine(lineNum, lineContent, sortedLines, currentIndex);
-            
-    //         if (result === 'END') {
-    //             this.executionContext.running = false;
-    //             break;
-    //         } else if (result === 'PAUSE') {
-    //             // Pause for INPUT
-    //             this.executionContext.currentIndex = currentIndex + 1;
-    //             return; // Exit and wait for input
-    //         } else if (result && result.type === 'GOTO') {
-    //             // Find target line
-    //             const targetIndex = sortedLines.findIndex(([num]) => num >= result.target);
-    //             if (targetIndex === -1) {
-    //                 this.printToScreen(`?UNDEFINED STATEMENT ERROR IN ${lineNum}`);
-    //                 this.executionContext.running = false;
-    //                 break;
-    //             }
-    //             currentIndex = targetIndex;
-    //             continue;
-    //         } else if (result && result.type === 'GOTO_INDEX') {
-    //             // Direct jump to index (for RETURN)
-    //             currentIndex = result.index;
-    //             continue;
-    //         } else if (result && result.type === 'NEXT_CONTINUE') {
-    //             // Continue FOR loop from stored position
-    //             currentIndex = result.index;
-    //             continue;
-    //         } else {
-    //             currentIndex++;
-    //         }
-    //     }
-        
-    //     if (this.executionContext.running) {
-    //         this.printToScreen('');
-    //         this.printToScreen('READY.');
-    //         this.executionContext = null;
-    //     }
-    // }
     continueExecution() {
         if (!this.executionContext || !this.executionContext.running) return;
         
@@ -1332,28 +1185,103 @@ export class C64Emulator {
 
     
 
-        // Update evaluateNumericExpression to handle case-insensitive variables
+        // Fix evaluateNumericExpression to handle arrays
         evaluateNumericExpression(expr) {
-            // Replace variables with their values (case-insensitive)
+            console.log('evaluateNumericExpression:', expr);
+            
+            // First, replace array accesses with their values
             let processedExpr = expr;
             
-            // Replace all single-letter variables
-            for (let c = 65; c <= 90; c++) {
-                const varName = String.fromCharCode(c);
-                if (this.basicVariables.has(varName)) {
-                    // Match both uppercase and lowercase in expression
-                    const regex = new RegExp(`\\b${varName}\\b`, 'gi');
-                    processedExpr = processedExpr.replace(regex, this.basicVariables.get(varName));
-                }
-            }
+            // Replace array accesses like A(1), B$(2,3), etc.
+            // Match array pattern: variable name followed by parentheses
+            const arrayPattern = /\b([A-Z][A-Z0-9]*\$?)\s*\(([^)]+)\)/gi;
             
+            processedExpr = processedExpr.replace(arrayPattern, (match, arrName, indices) => {
+                const arrayName = arrName.toUpperCase();
+                console.log(`Found array access: ${arrayName}(${indices})`);
+                
+                // Parse the indices
+                const indexList = indices.split(',').map(idx => {
+                    // Recursively evaluate each index expression
+                    const indexValue = this.evaluateNumericExpression(idx.trim());
+                    return Math.floor(indexValue);
+                });
+                
+                // Look up the array
+                if (this.basicArrays && this.basicArrays.has(arrayName)) {
+                    const array = this.basicArrays.get(arrayName);
+                    let element = array.data;
+                    
+                    // Navigate to the element
+                    for (let i = 0; i < indexList.length; i++) {
+                        const idx = indexList[i];
+                        if (Array.isArray(element) && idx >= 0 && idx < element.length) {
+                            element = element[idx];
+                        } else {
+                            console.log(`Array index out of bounds: ${idx}`);
+                            return '0';
+                        }
+                    }
+                    
+                    console.log(`Array ${arrayName}(${indexList.join(',')}) = ${element}`);
+                    return String(element);
+                } else {
+                    // Auto-create array if it doesn't exist
+                    console.log(`Array ${arrayName} not found, auto-creating`);
+                    if (!this.basicArrays) this.basicArrays = new Map();
+                    
+                    const dimensions = indexList.map(idx => Math.max(11, idx + 1));
+                    this.basicArrays.set(arrayName, {
+                        dimensions: dimensions,
+                        data: this.createMultiDimArray(dimensions, arrayName.endsWith('$') ? '' : 0)
+                    });
+                    
+                    return '0';
+                }
+            });
+            
+            console.log('After array replacement:', processedExpr);
+            
+            // Then replace simple variables
+            // Match whole words that are variable names (letters followed by optional digits)
+            const varPattern = /\b([A-Z][A-Z0-9]*)\b/gi;
+            
+            processedExpr = processedExpr.replace(varPattern, (match) => {
+                // Check if this is followed by '(' (then it's an array we already handled)
+                const nextCharIndex = processedExpr.indexOf(match) + match.length;
+                if (nextCharIndex < processedExpr.length && processedExpr[nextCharIndex] === '(') {
+                    return match; // Skip, it's an array
+                }
+                
+                const varName = match.toUpperCase();
+                if (this.basicVariables.has(varName)) {
+                    const value = this.basicVariables.get(varName);
+                    console.log(`Variable ${varName} = ${value}`);
+                    return String(value);
+                }
+                
+                // If variable doesn't exist, it's implicitly 0 in BASIC
+                return '0';
+            });
+            
+            console.log('After variable replacement:', processedExpr);
+            
+            // Now evaluate the mathematical expression
             try {
-                return eval(processedExpr);
+                // Basic safety check - only allow numbers, operators, and parentheses
+                if (!/^[\d\s\+\-\*\/\(\)\.]+$/.test(processedExpr)) {
+                    console.log('Expression contains invalid characters');
+                    return 0;
+                }
+                
+                const result = eval(processedExpr);
+                console.log('Evaluation result:', result);
+                return result;
             } catch (e) {
+                console.log('Error evaluating expression:', e);
                 return 0;
             }
         }
-
 
 
         // Replace the existing processBASICCommand method with this enhanced version
@@ -1437,33 +1365,85 @@ export class C64Emulator {
             return false;
         }
 
-        // Execute PRINT statement
+            
+        // Alternative approach - simpler version that properly handles semicolons
         executePRINT(expr) {
+            console.log('executePRINT:', expr);
+            
+            if (!expr || expr.trim() === '') {
+                this.printToScreen('');
+                return;
+            }
+            
             let output = '';
-            let newline = true;
+            let parts = [];
+            let current = '';
+            let inQuotes = false;
+            let parenCount = 0;
             
-            // Split by semicolons and commas
-            const parts = this.splitPrintExpression(expr);
-            
-            for (const part of parts) {
-                const trimmedPart = part.trim();
+            // Split by semicolons and commas, respecting quotes and parentheses
+            for (let i = 0; i < expr.length; i++) {
+                const char = expr[i];
                 
-                if (trimmedPart === '') continue;
-                
-                // Check if it ends with semicolon (no newline)
-                if (trimmedPart.endsWith(';')) {
-                    newline = false;
-                    const actualPart = trimmedPart.slice(0, -1).trim();
-                    output += this.evaluateExpression(actualPart);
-                } else {
-                    output += this.evaluateExpression(trimmedPart);
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === '(' && !inQuotes) {
+                    parenCount++;
+                } else if (char === ')' && !inQuotes) {
+                    parenCount--;
                 }
+                
+                if ((char === ';' || char === ',') && !inQuotes && parenCount === 0) {
+                    if (current.trim()) {
+                        parts.push({
+                            expr: current.trim(),
+                            separator: char
+                        });
+                    }
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            
+            // Add last part
+            if (current.trim()) {
+                parts.push({
+                    expr: current.trim(),
+                    separator: null
+                });
+            }
+            
+            console.log('Print parts:', parts);
+            
+            // Process each part
+            let position = 0;
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                const value = this.evaluateExpression(part.expr);
+                
+                output += value;
+                position += value.length;
+                
+                // Handle separator
+                if (part.separator === ',') {
+                    // Tab to next column
+                    const currentCol = position % 40;
+                    const nextTab = Math.floor(currentCol / 10) * 10 + 10;
+                    if (nextTab < 40) {
+                        const spaces = nextTab - currentCol;
+                        output += ' '.repeat(spaces);
+                        position += spaces;
+                    }
+                }
+                // Semicolon means no space (concatenation)
             }
             
             this.printToScreen(output);
             
-            if (newline && !expr.endsWith(';')) {
-                // Move to next line
+            // Add newline unless last character is ; or ,
+            const lastChar = expr.trim().slice(-1);
+            if (lastChar !== ';' && lastChar !== ',') {
                 this.vic.cursorX = 0;
                 this.vic.cursorY++;
                 if (this.vic.cursorY >= 25) {
@@ -1473,30 +1453,6 @@ export class C64Emulator {
             }
         }
 
-        // // Split PRINT expression handling quotes properly
-        // splitPrintExpression(expr) {
-        //     const parts = [];
-        //     let current = '';
-        //     let inQuotes = false;
-            
-        //     for (let i = 0; i < expr.length; i++) {
-        //         const char = expr[i];
-                
-        //         if (char === '"') {
-        //             inQuotes = !inQuotes;
-        //             current += char;
-        //         } else if ((char === ';' || char === ',') && !inQuotes) {
-        //             if (current) parts.push(current);
-        //             if (char === ';') parts.push(current + ';');
-        //             current = '';
-        //         } else {
-        //             current += char;
-        //         }
-        //     }
-            
-        //     if (current) parts.push(current);
-        //     return parts;
-        // }
 
         splitPrintExpression(expr) {
             const parts = [];
@@ -1531,428 +1487,11 @@ export class C64Emulator {
         }
 
 
-        // Evaluate expressions (numbers, strings, variables, math)
-        // evaluateExpression(expr) {
-        //     expr = expr.trim();
-            
-        //     // Handle quoted strings
-        //     if (expr.startsWith('"') && expr.endsWith('"')) {
-        //         return expr.slice(1, -1);
-        //     }
-            
-        //     // Handle CHR$() function
-        //     if (expr.startsWith('CHR$(') && expr.endsWith(')')) {
-        //         const num = parseInt(expr.slice(5, -1));
-        //         if (num === 147) {
-        //             // Clear screen
-        //             this.clearScreen();
-        //             return '';
-        //         }
-        //         return String.fromCharCode(num);
-        //     }
-            
-        //     // Handle string variables
-        //     if (expr.match(/^[A-Z]\$$/)) {
-        //         return this.basicStrings.get(expr) || '';
-        //     }
-            
-        //     // Handle numeric variables
-        //     if (expr.match(/^[A-Z]$/)) {
-        //         const value = this.basicVariables.get(expr);
-        //         return value !== undefined ? ' ' + value : ' 0';
-        //     }
-            
-        //     // Handle math expressions
-        //     if (/^[\d\+\-\*\/\(\)\s]+$/.test(expr)) {
-        //         try {
-        //             const result = eval(expr);
-        //             return ' ' + result;
-        //         } catch (e) {
-        //             return '?SYNTAX ERROR';
-        //         }
-        //     }
-            
-        //     // Handle expressions with variables
-        //     let processedExpr = expr;
-            
-        //     // Replace variables with their values
-        //     const varMatches = expr.match(/[A-Z]/g);
-        //     if (varMatches) {
-        //         for (const varName of varMatches) {
-        //             if (this.basicVariables.has(varName)) {
-        //                 processedExpr = processedExpr.replace(new RegExp(varName, 'g'), this.basicVariables.get(varName));
-        //             }
-        //         }
-        //     }
-            
-        //     // Try to evaluate the processed expression
-        //     try {
-        //         if (/^[\d\+\-\*\/\(\)\s\.]+$/.test(processedExpr)) {
-        //             const result = eval(processedExpr);
-        //             return ' ' + result;
-        //         }
-        //     } catch (e) {
-        //         // Fall through
-        //     }
-            
-        //     return expr;
-        // }
 
-        // // 2. Fix evaluateExpression to handle string variables without forcing uppercase
-        // evaluateExpression(expr) {
-        //     expr = expr.trim();
-            
-        //     // Handle quoted strings
-        //     if (expr.startsWith('"') && expr.endsWith('"')) {
-        //         return expr.slice(1, -1);
-        //     }
-            
-        //     // Handle CHR$() function
-        //     if (expr.match(/^CHR\$\s*\(\s*(\d+)\s*\)$/i)) {
-        //         const match = expr.match(/^CHR\$\s*\(\s*(\d+)\s*\)$/i);
-        //         const num = parseInt(match[1]);
-        //         if (num === 147) {
-        //             this.clearScreen();
-        //             return '';
-        //         }
-        //         return String.fromCharCode(num);
-        //     }
-            
-        //     // Handle string variables - check both cases
-        //     if (expr.match(/^[A-Za-z][A-Za-z0-9]*\$$/)) {
-        //         // Try exact case first
-        //         if (this.basicStrings.has(expr)) {
-        //             return this.basicStrings.get(expr) || '';
-        //         }
-        //         // Try uppercase
-        //         const upperExpr = expr.toUpperCase();
-        //         if (this.basicStrings.has(upperExpr)) {
-        //             return this.basicStrings.get(upperExpr) || '';
-        //         }
-        //         return '';
-        //     }
-            
-        //     // Handle numeric variables - check both cases
-        //     if (expr.match(/^[A-Za-z][A-Za-z0-9]*$/)) {
-        //         // Try exact case first
-        //         if (this.basicVariables.has(expr)) {
-        //             return String(this.basicVariables.get(expr));
-        //         }
-        //         // Try uppercase
-        //         const upperExpr = expr.toUpperCase();
-        //         if (this.basicVariables.has(upperExpr)) {
-        //             return String(this.basicVariables.get(upperExpr));
-        //         }
-        //         return '0';
-        //     }
-            
-        //     // Handle math expressions
-        //     if (/^[\d\+\-\*\/\(\)\s\.]+$/.test(expr)) {
-        //         try {
-        //             const result = eval(expr);
-        //             return String(result);
-        //         } catch (e) {
-        //             return '?SYNTAX ERROR';
-        //         }
-        //     }
-            
-        //     // Handle expressions with variables
-        //     let processedExpr = expr;
-            
-        //     // Replace variables with their values (both uppercase and lowercase)
-        //     const varPattern = /\b([A-Za-z][A-Za-z0-9]*\$?)\b/g;
-        //     processedExpr = processedExpr.replace(varPattern, (match) => {
-        //         // Check exact case first
-        //         if (this.basicVariables.has(match)) {
-        //             return this.basicVariables.get(match);
-        //         }
-        //         if (this.basicStrings.has(match)) {
-        //             return '"' + this.basicStrings.get(match) + '"';
-        //         }
-        //         // Check uppercase
-        //         const upperMatch = match.toUpperCase();
-        //         if (this.basicVariables.has(upperMatch)) {
-        //             return this.basicVariables.get(upperMatch);
-        //         }
-        //         if (this.basicStrings.has(upperMatch)) {
-        //             return '"' + this.basicStrings.get(upperMatch) + '"';
-        //         }
-        //         return match;
-        //     });
-            
-        //     // Try to evaluate the processed expression
-        //     try {
-        //         if (/^[\d\+\-\*\/\(\)\s\.]+$/.test(processedExpr)) {
-        //             const result = eval(processedExpr);
-        //             return String(result);
-        //         }
-        //     } catch (e) {
-        //         // Fall through
-        //     }
-            
-        //     return expr;
-        // }
-
-
-        // // Also update variable assignment to ensure uppercase
-        // executeAssignment(statement) {
-        //     const match = statement.match(/^([A-Z]\$?)\s*=\s*(.+)$/i); // ← Added 'i' flag
-        //     if (!match) {
-        //         this.printToScreen('?SYNTAX ERROR');
-        //         return;
-        //     }
-            
-        //     const varName = match[1].toUpperCase(); // ← ENSURE UPPERCASE
-        //     const expr = match[2].trim();
-            
-        //     if (varName.endsWith('$')) {
-        //         // String variable
-        //         const value = this.evaluateExpression(expr);
-        //         this.basicStrings.set(varName, value);
-        //     } else {
-        //         // Numeric variable
-        //         const value = this.evaluateNumericExpression(expr);
-        //         this.basicVariables.set(varName, value);
-        //     }
-        // }
-
-        // Fix evaluateExpression to handle array access
-        // evaluateExpression(expr) {
-        //     expr = expr.trim();
-            
-        //     // Handle quoted strings
-        //     if (expr.startsWith('"') && expr.endsWith('"')) {
-        //         return expr.slice(1, -1);
-        //     }
-            
-        //     // Handle CHR$() function
-        //     if (expr.match(/^CHR\$\s*\(\s*(\d+)\s*\)$/i)) {
-        //         const match = expr.match(/^CHR\$\s*\(\s*(\d+)\s*\)$/i);
-        //         const num = parseInt(match[1]);
-        //         if (num === 147) {
-        //             this.clearScreen();
-        //             return '';
-        //         }
-        //         return String.fromCharCode(num);
-        //     }
-            
-        //     // CHECK FOR ARRAY ACCESS FIRST (before simple variables)
-        //     // Match array access like A(3) or B$(1,2)
-        //     const arrayMatch = expr.match(/^([A-Za-z][A-Za-z0-9]*\$?)\s*\((.*)\)$/);
-        //     if (arrayMatch) {
-        //         const arrayName = arrayMatch[1].toUpperCase();
-        //         const indexExpr = arrayMatch[2];
-                
-        //         // Parse indices
-        //         const indices = indexExpr.split(',').map(idx => {
-        //             const evaluated = this.evaluateNumericExpression(idx.trim());
-        //             return Math.floor(evaluated);
-        //         });
-                
-        //         // Check if array exists
-        //         if (!this.basicArrays || !this.basicArrays.has(arrayName)) {
-        //             // Auto-dimension array if not exists (C64 BASIC behavior)
-        //             const dimensions = indices.map(() => 11); // Default size 11 (0-10)
-        //             if (!this.basicArrays) this.basicArrays = new Map();
-        //             this.basicArrays.set(arrayName, {
-        //                 dimensions: dimensions,
-        //                 data: this.createMultiDimArray(dimensions, arrayName.endsWith('$') ? '' : 0)
-        //             });
-        //         }
-                
-        //         const array = this.basicArrays.get(arrayName);
-                
-        //         // Access array element
-        //         let element = array.data;
-        //         for (let i = 0; i < indices.length; i++) {
-        //             const idx = indices[i];
-        //             if (idx < 0 || idx >= element.length) {
-        //                 return '?SUBSCRIPT OUT OF RANGE';
-        //             }
-        //             element = element[idx];
-        //         }
-                
-        //         return String(element);
-        //     }
-            
-        //     // Handle string variables - check both cases
-        //     if (expr.match(/^[A-Za-z][A-Za-z0-9]*\$$/)) {
-        //         // Try exact case first
-        //         if (this.basicStrings.has(expr)) {
-        //             return this.basicStrings.get(expr) || '';
-        //         }
-        //         // Try uppercase
-        //         const upperExpr = expr.toUpperCase();
-        //         if (this.basicStrings.has(upperExpr)) {
-        //             return this.basicStrings.get(upperExpr) || '';
-        //         }
-        //         return '';
-        //     }
-            
-        //     // Handle numeric variables - check both cases
-        //     if (expr.match(/^[A-Za-z][A-Za-z0-9]*$/)) {
-        //         // Try exact case first
-        //         if (this.basicVariables.has(expr)) {
-        //             return String(this.basicVariables.get(expr));
-        //         }
-        //         // Try uppercase
-        //         const upperExpr = expr.toUpperCase();
-        //         if (this.basicVariables.has(upperExpr)) {
-        //             return String(this.basicVariables.get(upperExpr));
-        //         }
-        //         return '0';
-        //     }
-            
-        //     // Handle math expressions
-        //     if (/^[\d\+\-\*\/\(\)\s\.]+$/.test(expr)) {
-        //         try {
-        //             const result = eval(expr);
-        //             return String(result);
-        //         } catch (e) {
-        //             return '?SYNTAX ERROR';
-        //         }
-        //     }
-            
-        //     // Handle expressions with variables and arrays
-        //     let processedExpr = expr;
-            
-        //     // First replace array accesses
-        //     const arrayPattern = /\b([A-Za-z][A-Za-z0-9]*\$?)\s*\(([^)]+)\)/g;
-        //     processedExpr = processedExpr.replace(arrayPattern, (match, arrName, indices) => {
-        //         const arrayName = arrName.toUpperCase();
-        //         const indexList = indices.split(',').map(idx => {
-        //             return Math.floor(this.evaluateNumericExpression(idx.trim()));
-        //         });
-                
-        //         if (this.basicArrays && this.basicArrays.has(arrayName)) {
-        //             const array = this.basicArrays.get(arrayName);
-        //             let element = array.data;
-                    
-        //             for (const idx of indexList) {
-        //                 if (Array.isArray(element) && idx >= 0 && idx < element.length) {
-        //                     element = element[idx];
-        //                 } else {
-        //                     return '0';
-        //                 }
-        //             }
-                    
-        //             return String(element);
-        //         }
-        //         return '0';
-        //     });
-            
-        //     // Then replace simple variables
-        //     const varPattern = /\b([A-Za-z][A-Za-z0-9]*\$?)\b/g;
-        //     processedExpr = processedExpr.replace(varPattern, (match) => {
-        //         // Skip if it's followed by '(' (array)
-        //         if (processedExpr.charAt(processedExpr.indexOf(match) + match.length) === '(') {
-        //             return match;
-        //         }
-                
-        //         // Check exact case first
-        //         if (this.basicVariables.has(match)) {
-        //             return this.basicVariables.get(match);
-        //         }
-        //         if (this.basicStrings.has(match)) {
-        //             return '"' + this.basicStrings.get(match) + '"';
-        //         }
-        //         // Check uppercase
-        //         const upperMatch = match.toUpperCase();
-        //         if (this.basicVariables.has(upperMatch)) {
-        //             return this.basicVariables.get(upperMatch);
-        //         }
-        //         if (this.basicStrings.has(upperMatch)) {
-        //             return '"' + this.basicStrings.get(upperMatch) + '"';
-        //         }
-        //         return match;
-        //     });
-            
-        //     // Try to evaluate the processed expression
-        //     try {
-        //         if (/^[\d\+\-\*\/\(\)\s\.]+$/.test(processedExpr)) {
-        //             const result = eval(processedExpr);
-        //             return String(result);
-        //         }
-        //     } catch (e) {
-        //         // Fall through
-        //     }
-            
-        //     return expr;
-        // }
-
-
-
-        // // Let's also check evaluateExpression for array access
-        // evaluateExpression(expr) {
-        //     expr = expr.trim();
-        //     console.log('evaluateExpression called with:', expr);
-            
-        //     // Handle quoted strings
-        //     if (expr.startsWith('"') && expr.endsWith('"')) {
-        //         return expr.slice(1, -1);
-        //     }
-            
-        //     // CHECK FOR ARRAY ACCESS
-        //     // Updated regex to handle $ in array names
-        //     const arrayMatch = expr.match(/^([A-Z][A-Z0-9]*\$?)\s*\(([^)]+)\)$/i);
-        //     if (arrayMatch) {
-        //         console.log('Array access detected:', arrayMatch);
-        //         const arrayName = arrayMatch[1].toUpperCase();
-        //         const indexExpr = arrayMatch[2];
-                
-        //         console.log('Looking for array:', arrayName);
-        //         console.log('Available arrays:', this.basicArrays ? Array.from(this.basicArrays.keys()) : 'None');
-                
-        //         // Parse indices
-        //         const indices = indexExpr.split(',').map(idx => {
-        //             const evaluated = this.evaluateNumericExpression(idx.trim());
-        //             return Math.floor(evaluated);
-        //         });
-                
-        //         console.log('Indices:', indices);
-                
-        //         // Check if array exists
-        //         if (!this.basicArrays || !this.basicArrays.has(arrayName)) {
-        //             console.log('Array not found, auto-dimensioning');
-        //             // Auto-dimension array if not exists (C64 BASIC behavior)
-        //             const dimensions = indices.map(() => 11); // Default size 11 (0-10)
-        //             if (!this.basicArrays) this.basicArrays = new Map();
-        //             this.basicArrays.set(arrayName, {
-        //                 dimensions: dimensions,
-        //                 data: this.createMultiDimArray(dimensions, arrayName.endsWith('$') ? '' : 0)
-        //             });
-        //         }
-                
-        //         const array = this.basicArrays.get(arrayName);
-        //         console.log('Array found:', array);
-                
-        //         // Access array element
-        //         let element = array.data;
-        //         for (let i = 0; i < indices.length; i++) {
-        //             const idx = indices[i];
-        //             if (idx < 0 || idx >= element.length) {
-        //                 console.log('Index out of range:', idx, 'for array length:', element.length);
-        //                 return '?SUBSCRIPT OUT OF RANGE';
-        //             }
-        //             element = element[idx];
-        //         }
-                
-        //         console.log('Array element value:', element);
-        //         return String(element);
-        //     }
-            
-        //     // ... rest of evaluateExpression code remains the same ...
-            
-        //     // For debugging, let's return the original expression if nothing matches
-        //     console.log('No match found, returning original expression');
-        //     return expr;
-        // }
-
-        // Also ensure evaluateExpression handles the array case properly
-        // Update just the array matching part to be more robust
-        evaluateExpression(expr) {
+        // Fix evaluateExpression to handle concatenation context
+        evaluateExpression(expr, inConcatenation = false) {
             expr = expr.trim();
-            console.log('evaluateExpression:', expr);
+            console.log('evaluateExpression:', expr, 'concatenation:', inConcatenation);
             
             // Handle quoted strings
             if (expr.startsWith('"') && expr.endsWith('"')) {
@@ -1970,17 +1509,13 @@ export class C64Emulator {
                 return String.fromCharCode(num);
             }
             
-            // CHECK FOR ARRAY ACCESS - improved regex
-            // This should match: A(5), B$(1,2), etc.
-            if (expr.includes('(') && expr.includes(')')) {
-                const arrayMatch = expr.match(/^([A-Z]+\$?)\s*\(([^)]+)\)$/i);
-                console.log('Array match attempt:', arrayMatch);
+            // For direct array access (like in PRINT A(1))
+            if (expr.match(/^([A-Z][A-Z0-9]*\$?)\s*\(([^)]+)\)$/i)) {
+                const arrayMatch = expr.match(/^([A-Z][A-Z0-9]*\$?)\s*\(([^)]+)\)$/i);
                 
                 if (arrayMatch) {
                     const arrayName = arrayMatch[1].toUpperCase();
                     const indexExpr = arrayMatch[2];
-                    
-                    console.log('Array name:', arrayName, 'Index expr:', indexExpr);
                     
                     // Parse indices
                     const indices = indexExpr.split(',').map(idx => {
@@ -1990,7 +1525,6 @@ export class C64Emulator {
                     
                     // Check if array exists
                     if (!this.basicArrays || !this.basicArrays.has(arrayName)) {
-                        console.log('Array not found:', arrayName);
                         // Auto-dimension array if not exists
                         const dimensions = indices.map(() => 11);
                         if (!this.basicArrays) this.basicArrays = new Map();
@@ -2012,13 +1546,17 @@ export class C64Emulator {
                         element = element[idx];
                     }
                     
-                    console.log('Array value:', element);
+                    // Return with proper spacing for numeric values
+                    if (!arrayName.endsWith('$') && !isNaN(element)) {
+                        // Only add space if not in concatenation
+                        return inConcatenation ? String(element) : ' ' + element;
+                    }
                     return String(element);
                 }
             }
             
             // Handle string variables
-            if (expr.match(/^[A-Z]+\$$/i)) {
+            if (expr.match(/^[A-Z][A-Z0-9]*\$$/i)) {
                 const upperExpr = expr.toUpperCase();
                 if (this.basicStrings.has(upperExpr)) {
                     return this.basicStrings.get(upperExpr) || '';
@@ -2026,29 +1564,42 @@ export class C64Emulator {
                 return '';
             }
             
-            // Handle numeric variables
-            if (expr.match(/^[A-Z]+$/i)) {
+            // Handle simple numeric variables
+            if (expr.match(/^[A-Z][A-Z0-9]*$/i)) {
                 const upperExpr = expr.toUpperCase();
                 if (this.basicVariables.has(upperExpr)) {
-                    return String(this.basicVariables.get(upperExpr));
+                    const value = this.basicVariables.get(upperExpr);
+                    // Only add space if not in concatenation
+                    return inConcatenation ? String(value) : ' ' + value;
                 }
-                return '0';
+                return inConcatenation ? '0' : ' 0';
             }
             
-            // Handle numeric expressions
-            try {
-                const num = parseFloat(expr);
-                if (!isNaN(num)) {
-                    return String(num);
+            // For expressions with operators, use evaluateNumericExpression
+            if (expr.match(/[\+\-\*\/]/) || expr.match(/\b[A-Z]+\s*\(/i)) {
+                const result = this.evaluateNumericExpression(expr);
+                // Only add space if not in concatenation and positive
+                if (!inConcatenation && result >= 0) {
+                    return ' ' + result;
                 }
-            } catch (e) {
-                // Not a number
+                return String(result);
+            }
+            
+            // Handle plain numbers
+            const num = parseFloat(expr);
+            if (!isNaN(num)) {
+                // Only add space if not in concatenation and positive
+                if (!inConcatenation && num >= 0) {
+                    return ' ' + num;
+                }
+                return String(num);
             }
             
             // Return original if no match
-            console.log('No evaluation match, returning:', expr);
             return expr;
         }
+
+
 
 
         // Also fix executeAssignment to handle array assignment properly
@@ -2399,202 +1950,6 @@ export class C64Emulator {
         return currentIndex + 1;
     }
 
-    // Next essential BASIC features for C64 Emulator
-    // Add these methods to your C64Emulator class
-
-    // 1. INPUT statement - Get user input
-    // executeINPUT(statement) {
-    //     // Parse INPUT statement: INPUT "prompt"; variable
-    //     const match = statement.match(/^INPUT\s*(?:"([^"]*)"(?:\s*;)?\s*)?([A-Z]\$?)$/i);
-    //     if (!match) {
-    //         this.printToScreen('?SYNTAX ERROR');
-    //         return;
-    //     }
-        
-    //     const prompt = match[1] || '?';
-    //     const varName = match[2].toUpperCase();
-        
-    //     // Print prompt
-    //     this.printToScreen(prompt + ' ');
-        
-    //     // Set up input mode
-    //     this.inputMode = {
-    //         active: true,
-    //         varName: varName,
-    //         isString: varName.endsWith('$'),
-    //         buffer: '',
-    //         cursorStart: this.vic.cursorX
-    //     };
-        
-    //     // Show cursor
-    //     this.showCursor = true;
-    // }
-
-    // // Handle input mode in processBASICCommand
-    // handleInputMode(char) {
-    //     if (!this.inputMode || !this.inputMode.active) return false;
-        
-    //     if (char === '\n') {
-    //         // Input complete
-    //         const value = this.inputMode.buffer;
-            
-    //         if (this.inputMode.isString) {
-    //             this.basicStrings.set(this.inputMode.varName, value);
-    //         } else {
-    //             const numValue = parseFloat(value) || 0;
-    //             this.basicVariables.set(this.inputMode.varName, numValue);
-    //         }
-            
-    //         // Clear input mode
-    //         this.inputMode = null;
-    //         this.showCursor = false;
-            
-    //         // Continue program execution
-    //         this.continueExecution();
-    //         return true;
-    //     } else if (char === '\b') {
-    //         // Backspace
-    //         if (this.inputMode.buffer.length > 0) {
-    //             this.inputMode.buffer = this.inputMode.buffer.slice(0, -1);
-    //             // Update display
-    //             this.vic.cursorX--;
-    //             const screenPos = this.vic.cursorY * 40 + this.vic.cursorX;
-    //             this.memory.write(0x0400 + screenPos, 0x20); // Space
-    //         }
-    //     } else {
-    //         // Add character to buffer
-    //         this.inputMode.buffer += char;
-    //         // Display character
-    //         const screenPos = this.vic.cursorY * 40 + this.vic.cursorX;
-    //         const screenCode = this.asciiToScreenCode(char.charCodeAt(0));
-    //         this.memory.write(0x0400 + screenPos, screenCode);
-    //         this.vic.cursorX++;
-    //     }
-        
-    //     return true;
-    // }
-
-    // Fixed INPUT statement implementation
-        // executeINPUT(statement) {
-        //     // INPUT can have several formats:
-        //     // INPUT A
-        //     // INPUT A$
-        //     // INPUT "prompt"; A
-        //     // INPUT "prompt"; A$
-        //     // INPUT A, B, C (multiple variables)
-            
-        //     let prompt = "? ";  // Default prompt
-        //     let variables = [];
-        //     let remainingStatement = statement.trim();
-            
-        //     // Check if there's a quoted prompt
-        //     if (remainingStatement.startsWith('"')) {
-        //         const endQuoteIndex = remainingStatement.indexOf('"', 1);
-        //         if (endQuoteIndex !== -1) {
-        //             prompt = remainingStatement.substring(1, endQuoteIndex);
-        //             remainingStatement = remainingStatement.substring(endQuoteIndex + 1).trim();
-                    
-        //             // Skip the semicolon if present
-        //             if (remainingStatement.startsWith(';')) {
-        //                 remainingStatement = remainingStatement.substring(1).trim();
-        //             }
-        //         }
-        //     }
-            
-        //     // Parse variable names (comma separated)
-        //     if (remainingStatement) {
-        //         variables = remainingStatement.split(',').map(v => v.trim().toUpperCase());
-        //     }
-            
-        //     if (variables.length === 0) {
-        //         this.printToScreen('?SYNTAX ERROR');
-        //         return;
-        //     }
-            
-        //     console.log(`INPUT: prompt="${prompt}", variables=${variables.join(',')}`);
-            
-        //     // Print prompt (without newline)
-        //     for (const char of prompt) {
-        //         const screenPos = this.vic.cursorY * 40 + this.vic.cursorX;
-        //         const screenCode = this.asciiToScreenCode(char.charCodeAt(0));
-                
-        //         this.memory.write(0x0400 + screenPos, screenCode);
-        //         this.memory.write(0xD800 + screenPos, 14);
-                
-        //         this.vic.cursorX++;
-        //         if (this.vic.cursorX >= 40) {
-        //             this.vic.cursorX = 0;
-        //             this.vic.cursorY++;
-        //             if (this.vic.cursorY >= 25) {
-        //                 this.scrollScreen();
-        //                 this.vic.cursorY = 24;
-        //             }
-        //         }
-        //     }
-            
-        //     // Set up input mode
-        //     this.inputMode = {
-        //         active: true,
-        //         variables: variables,
-        //         currentVarIndex: 0,
-        //         buffer: '',
-        //         startX: this.vic.cursorX,
-        //         startY: this.vic.cursorY
-        //     };
-            
-        //     // Show cursor
-        //     this.showInputCursor = true;
-        //     this.vic.renderFrame();
-        // }
-
-        // Simplified executeINPUT that works with your existing code
-        // executeINPUT(statement) {
-        //     // Parse INPUT statement
-        //     let prompt = "? ";
-        //     let variables = [];
-        //     let remainingStatement = statement.trim();
-            
-        //     // Check if there's a quoted prompt
-        //     if (remainingStatement.startsWith('"')) {
-        //         const endQuoteIndex = remainingStatement.indexOf('"', 1);
-        //         if (endQuoteIndex !== -1) {
-        //             prompt = remainingStatement.substring(1, endQuoteIndex);
-        //             remainingStatement = remainingStatement.substring(endQuoteIndex + 1).trim();
-                    
-        //             // Skip the semicolon if present
-        //             if (remainingStatement.startsWith(';')) {
-        //                 remainingStatement = remainingStatement.substring(1).trim();
-        //             }
-        //         }
-        //     }
-            
-        //     // Parse variable names
-        //     if (remainingStatement) {
-        //         variables = remainingStatement.split(',').map(v => v.trim().toUpperCase());
-        //     }
-            
-        //     if (variables.length === 0) {
-        //         this.printToScreen('?SYNTAX ERROR');
-        //         return;
-        //     }
-            
-        //     // Print prompt using existing writeCharToScreen
-        //     for (const char of prompt) {
-        //         this.writeCharToScreen(char.charCodeAt(0));
-        //     }
-            
-        //     // Set up input mode
-        //     this.inputMode = {
-        //         active: true,
-        //         variables: variables,
-        //         currentVarIndex: 0,
-        //         buffer: ''
-        //     };
-            
-        //     // Return 'PAUSE' to pause execution
-        //     return 'PAUSE';
-        // }
-
 
         // 3. Update executeINPUT to NOT force uppercase (for case sensitivity)
         executeINPUT(statement) {
@@ -2645,133 +2000,105 @@ export class C64Emulator {
         }
 
 
-        // 1. Fix executePRINT to handle semicolons properly
-        // executePRINT(expr) {
-        //     let output = '';
-        //     let position = 0;
-        //     let addSpace = false;
-            
-        //     // Parse the print expression properly
-        //     while (position < expr.length) {
-        //         // Skip whitespace
-        //         while (position < expr.length && expr[position] === ' ') {
-        //             position++;
-        //         }
-                
-        //         if (position >= expr.length) break;
-                
-        //         // Check for semicolon or comma
-        //         if (expr[position] === ';') {
-        //             addSpace = false;
-        //             position++;
-        //             continue;
-        //         }
-                
-        //         if (expr[position] === ',') {
-        //             // Tab to next column (every 10 spaces in C64)
-        //             const currentLen = output.length % 40;
-        //             const nextTab = Math.floor(currentLen / 10) * 10 + 10;
-        //             while (output.length % 40 < nextTab && output.length % 40 !== 0) {
-        //                 output += ' ';
-        //             }
-        //             position++;
-        //             continue;
-        //         }
-                
-        //         // Parse next expression
-        //         let endPos = position;
-        //         let inQuotes = false;
-                
-        //         // Find the end of this expression
-        //         while (endPos < expr.length) {
-        //             if (expr[endPos] === '"') {
-        //                 inQuotes = !inQuotes;
-        //             } else if (!inQuotes && (expr[endPos] === ';' || expr[endPos] === ',')) {
-        //                 break;
-        //             }
-        //             endPos++;
-        //         }
-                
-        //         // Get the expression
-        //         const subExpr = expr.substring(position, endPos).trim();
-                
-        //         if (subExpr) {
-        //             // Add space before numeric values (C64 BASIC behavior)
-        //             if (addSpace) {
-        //                 output += ' ';
-        //             }
-                    
-        //             const value = this.evaluateExpression(subExpr);
-        //             output += value;
-                    
-        //             // Numeric values get space after them by default
-        //             addSpace = !isNaN(value);
-        //         }
-                
-        //         position = endPos;
-        //     }
-            
-        //     // Print the output
-        //     this.printToScreen(output);
-            
-        //     // Handle newline (unless expression ends with semicolon)
-        //     if (!expr.trim().endsWith(';')) {
-        //         this.vic.cursorX = 0;
-        //         this.vic.cursorY++;
-        //         if (this.vic.cursorY >= 25) {
-        //             this.scrollScreen();
-        //             this.vic.cursorY = 24;
-        //         }
-        //     }
-        // }
-
-        // Updated executePRINT to properly handle the parts
+        // Updated executePRINT to track concatenation context
         executePRINT(expr) {
             console.log('executePRINT:', expr);
             
-            // Split the expression properly
-            const parts = this.splitPrintExpression(expr);
-            console.log('Print parts:', parts);
+            if (!expr || expr.trim() === '') {
+                this.printToScreen('');
+                return;
+            }
             
+            // Parse the expression into parts, respecting quotes
+            const parts = [];
+            let current = '';
+            let i = 0;
+            
+            while (i < expr.length) {
+                // Check if we're starting a quoted string
+                if (expr[i] === '"') {
+                    // Find the closing quote
+                    let j = i + 1;
+                    while (j < expr.length && expr[j] !== '"') {
+                        j++;
+                    }
+                    
+                    if (j < expr.length) {
+                        // Include both quotes
+                        current += expr.substring(i, j + 1);
+                        i = j + 1;
+                    } else {
+                        // Unclosed quote
+                        current += expr[i];
+                        i++;
+                    }
+                } else if (expr[i] === ';' || expr[i] === ',') {
+                    // Found separator outside quotes
+                    if (current.trim()) {
+                        parts.push({
+                            expr: current.trim(),
+                            separator: expr[i]
+                        });
+                        current = '';
+                    }
+                    i++;
+                } else {
+                    current += expr[i];
+                    i++;
+                }
+            }
+            
+            // Add last part
+            if (current.trim()) {
+                parts.push({
+                    expr: current.trim(),
+                    separator: null
+                });
+            }
+            
+            console.log('Parsed parts:', parts.map(p => ({ expr: p.expr, sep: p.separator })));
+            
+            // Build output
             let output = '';
             let position = 0;
+            let previousWasSemicolon = false;
             
             for (let i = 0; i < parts.length; i++) {
                 const part = parts[i];
                 
-                if (part === ',') {
-                    // Tab to next column (every 10 spaces in C64)
-                    const currentLen = position % 40;
-                    const nextTab = Math.floor(currentLen / 10) * 10 + 10;
-                    while (position % 40 < nextTab && position % 40 !== 0) {
-                        output += ' ';
-                        position++;
-                    }
-                    continue;
-                }
+                // Check if this value should be concatenated (previous separator was semicolon)
+                const inConcatenation = previousWasSemicolon;
                 
-                // Evaluate the expression
-                const value = this.evaluateExpression(part);
-                console.log(`Evaluated "${part}" to "${value}"`);
+                // Evaluate the expression with concatenation context
+                const value = this.evaluateExpression(part.expr, inConcatenation);
+                console.log(`Evaluated "${part.expr}" to "${value}" (concat: ${inConcatenation})`);
                 
-                // Add the value to output
                 output += value;
                 position += value.length;
                 
-                // Check if next part is not a comma (add space between items)
-                if (i < parts.length - 1 && parts[i + 1] !== ',') {
-                    // Don't add space after strings or if next is semicolon
-                    if (!part.startsWith('"') && i + 1 < parts.length) {
-                        output += ' ';
-                        position++;
+                // Handle separator
+                if (part.separator === ',') {
+                    // Tab to next 10-character column
+                    const currentCol = position % 40;
+                    const nextTab = Math.floor(currentCol / 10) * 10 + 10;
+                    if (nextTab < 40) {
+                        const spaces = nextTab - currentCol;
+                        output += ' '.repeat(spaces);
+                        position += spaces;
                     }
+                    previousWasSemicolon = false;
+                } else if (part.separator === ';') {
+                    previousWasSemicolon = true;
+                } else {
+                    previousWasSemicolon = false;
                 }
             }
             
             this.printToScreen(output);
             
-            // Handle newline (unless expression ends with semicolon)
-            if (!expr.trim().endsWith(';')) {
+            // Add newline unless expression ends with ; or ,
+            const lastChar = expr.trim().slice(-1);
+            if (lastChar !== ';' && lastChar !== ',') {
                 this.vic.cursorX = 0;
                 this.vic.cursorY++;
                 if (this.vic.cursorY >= 25) {
@@ -2780,7 +2107,6 @@ export class C64Emulator {
                 }
             }
         }
-
 
         // Updated handleInputMode to support multiple variables
         handleInputMode(input) {
@@ -3263,6 +2589,7 @@ export class C64Emulator {
         return null;
     }
 
+    
     // Test programs for new features:
     /*
     Test INPUT:
